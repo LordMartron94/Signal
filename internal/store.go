@@ -17,3 +17,7 @@ func SignalStoreCreate() *SignalStore {
 func SignalStoreStore(store *SignalStore, signal Signal) error {
 	return nil
 }
+
+func SignalStoreStoredAmountGet(store *SignalStore) int {
+	return 1
+}

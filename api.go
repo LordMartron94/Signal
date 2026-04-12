@@ -17,3 +17,7 @@ func SignalStoreCreate() *SignalStore {
 func SignalStoreStore(store *SignalStore, in Signal) error {
 	return internal.SignalStoreStore(store, in)
 }
+
+func SignalStoreStoredAmountGet(store *SignalStore) int {
+	return internal.SignalStoreStoredAmountGet(store)
+}

@@ -9,10 +9,12 @@ import (
 type caseValidator func(output signalTestOutput) shield.AtomResult
 
 type signalTestOutput struct {
-	panicked     bool
-	panicMessage string
+	operationPanicked     bool
+	operationPanicMessage string
 
-	error error
+	operationError error
+
+	testError error
 }
 
 func SignalMainUnit(order int) shield.Unit {
@@ -69,7 +71,6 @@ func getCreationAtom(order int) *shield.Atom[struct{}, signalTestOutput] {
 		func(errorMessage string) string {
 			return fmt.Sprintf("unexpected error during creation: %s", errorMessage)
 		},
-		nil,
 	)
 
 	shield.AtomRegisterCase(creationAtom, shield.CaseCreate(
@@ -91,7 +92,12 @@ func getStoreAtom(order int) *shield.Atom[signal.Signal, signalTestOutput] {
 		defer catchOutputPanic(&output)
 
 		err := signal.SignalStoreStore(store, in)
-		output.error = err
+		output.operationError = err
+
+		signalAmount := signal.SignalStoreStoredAmountGet(store)
+		if signalAmount != 1 {
+			output.testError = fmt.Errorf("required signal amount 1, got %d", signalAmount)
+		}
 
 		return output
 	}
@@ -114,7 +120,6 @@ func getStoreAtom(order int) *shield.Atom[signal.Signal, signalTestOutput] {
 		func(errorMessage string) string {
 			return fmt.Sprintf("unexpected error during store operation: %s", errorMessage)
 		},
-		nil,
 	)
 
 	shield.AtomRegisterCase(storeAtom, shield.CaseCreate(
@@ -132,19 +137,18 @@ func getStoreAtom(order int) *shield.Atom[signal.Signal, signalTestOutput] {
 func getCaseValidator(
 	panicMessageFormatter func(panicMessage string) string,
 	errorMessageFormatter func(panicMessage string) string,
-	subValidator func(output signalTestOutput) shield.AtomResult,
 ) caseValidator {
 	return func(output signalTestOutput) shield.AtomResult {
-		if output.panicked {
-			return *shield.AtomResultFailureCreate(panicMessageFormatter(output.panicMessage))
+		if output.operationPanicked {
+			return *shield.AtomResultFailureCreate(panicMessageFormatter(output.operationPanicMessage))
 		}
 
-		if output.error != nil {
-			return *shield.AtomResultFailureCreate(errorMessageFormatter(output.error.Error()))
+		if output.operationError != nil {
+			return *shield.AtomResultFailureCreate(errorMessageFormatter(output.operationError.Error()))
 		}
 
-		if subValidator != nil {
-			return subValidator(output)
+		if output.testError != nil {
+			return *shield.AtomResultFailureCreate(fmt.Sprintf("TEST Error: %s", output.testError.Error()))
 		}
 
 		return *shield.AtomResultSuccessCreate()
@@ -155,7 +159,7 @@ func getCaseValidator(
 
 func catchOutputPanic(output *signalTestOutput) {
 	if r := recover(); r != nil {
-		output.panicked = true
-		output.panicMessage = fmt.Sprintf("%v", r)
+		output.operationPanicked = true
+		output.operationPanicMessage = fmt.Sprintf("%v", r)
 	}
 }

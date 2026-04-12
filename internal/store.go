@@ -8,16 +8,21 @@ func SignalCreate() *Signal {
 }
 
 type SignalStore struct {
+	storedSignals []Signal
 }
 
 func SignalStoreCreate() *SignalStore {
-	return &SignalStore{}
+	return &SignalStore{
+		storedSignals: make([]Signal, 0),
+	}
 }
 
 func SignalStoreStore(store *SignalStore, signal Signal) error {
+	store.storedSignals = append(store.storedSignals, signal)
+
 	return nil
 }
 
 func SignalStoreStoredAmountGet(store *SignalStore) int {
-	return 1
+	return len(store.storedSignals)
 }

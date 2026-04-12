@@ -85,33 +85,32 @@ func getCreationAtom(order int) *shield.Atom[struct{}, signalTestOutput] {
 
 // ------ STORING ------
 
-func getStoreAtom(order int) *shield.Atom[signal.Signal, signalTestOutput] {
-	var store *signal.SignalStore = nil
+type storeRunnerCaseInput struct {
+	signals []signal.Signal
+}
 
-	runner := func(in signal.Signal) (output signalTestOutput) {
+func getStoreAtom(order int) *shield.Atom[storeRunnerCaseInput, signalTestOutput] {
+	runner := func(in storeRunnerCaseInput) (output signalTestOutput) {
 		defer catchOutputPanic(&output)
 
-		err := signal.SignalStoreStore(store, in)
-		output.operationError = err
+		store := signal.SignalStoreCreate()
+
+		for _, signalToAdd := range in.signals {
+			err := signal.SignalStoreStore(store, signalToAdd)
+			output.operationError = err
+		}
 
 		signalAmount := signal.SignalStoreStoredAmountGet(store)
-		if signalAmount != 1 {
-			output.testError = fmt.Errorf("required signal amount 1, got %d", signalAmount)
+		requiredAmount := len(in.signals)
+		if signalAmount != requiredAmount {
+			output.testError = fmt.Errorf("required signal amount %d, got %d", requiredAmount, signalAmount)
 		}
 
 		return output
 	}
 
-	setup := func() {
-		store = signal.SignalStoreCreate()
-	}
-	teardown := func() {
-		store = nil
-	}
-
 	storeAtom := shield.AtomCreate(order, "store", runner)
 	shield.AtomSetDescription(storeAtom, "Validates the signal store storing functionality works correctly.")
-	shield.AtomSetSetupAndTeardown(storeAtom, setup, teardown)
 
 	mainValidator := getCaseValidator(
 		func(panicMessage string) string {
@@ -123,7 +122,23 @@ func getStoreAtom(order int) *shield.Atom[signal.Signal, signalTestOutput] {
 	)
 
 	shield.AtomRegisterCase(storeAtom, shield.CaseCreate(
-		"default", *signal.SignalCreate(),
+		"single", storeRunnerCaseInput{
+			signals: []signal.Signal{
+				*signal.SignalCreate(),
+			},
+		},
+		func(output signalTestOutput) shield.AtomResult {
+			return mainValidator(output)
+		},
+	))
+
+	shield.AtomRegisterCase(storeAtom, shield.CaseCreate(
+		"double", storeRunnerCaseInput{
+			signals: []signal.Signal{
+				*signal.SignalCreate(),
+				*signal.SignalCreate(),
+			},
+		},
 		func(output signalTestOutput) shield.AtomResult {
 			return mainValidator(output)
 		},

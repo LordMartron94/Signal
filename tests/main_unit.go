@@ -19,6 +19,7 @@ func init() {
 
 	operation := shield.SHIELD_Testing_OperationCreateStateless(
 		"signal_store_operation",
+		"Validates Signal store lifecycle behavior, including creation and storing multiple signals.",
 		func(_ struct{}, execCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
 			return []shield.SHIELD_Testing_ScenarioRunResult{
 				shield.SHIELD_Testing_OperationRunScenario(creationScenario, execCtx, runCfg),
@@ -26,10 +27,6 @@ func init() {
 			}
 		},
 		"SIGNAL", "Store",
-	)
-	shield.SHIELD_Testing_OperationDescriptionSet(
-		&operation,
-		"Validates Signal store lifecycle behavior, including creation and storing multiple signals.",
 	)
 	shield.SHIELD_Registry_OperationRegister(operation)
 }
@@ -47,15 +44,12 @@ func buildStoreCreationScenario() shield.SHIELD_Testing_Scenario[struct{}, bool]
 
 	scenario := shield.SHIELD_Testing_ScenarioCreate(
 		"signal_store_create",
+		"Ensures SignalStoreCreate returns a valid store instance without panicking.",
 		[]shield.SHIELD_Testing_Guard[struct{}, bool]{guard},
 		func(_ struct{}) (bool, error) {
 			store := signal.SignalStoreCreate()
 			return store != nil, nil
 		},
-	)
-	shield.SHIELD_Testing_ScenarioDescriptionSet(
-		&scenario,
-		"Ensures SignalStoreCreate returns a valid store instance without panicking.",
 	)
 	return scenario
 }
@@ -86,6 +80,7 @@ func buildStoreScenario() shield.SHIELD_Testing_Scenario[storeInput, int] {
 
 	scenario := shield.SHIELD_Testing_ScenarioCreate(
 		"signal_store_store",
+		"Verifies SignalStoreStore accepts single and multiple signals and reports the expected stored count.",
 		[]shield.SHIELD_Testing_Guard[storeInput, int]{guardSingle, guardDouble},
 		func(input storeInput) (int, error) {
 			store := signal.SignalStoreCreate()
@@ -96,10 +91,6 @@ func buildStoreScenario() shield.SHIELD_Testing_Scenario[storeInput, int] {
 			}
 			return signal.SignalStoreStoredAmountGet(store), nil
 		},
-	)
-	shield.SHIELD_Testing_ScenarioDescriptionSet(
-		&scenario,
-		"Verifies SignalStoreStore accepts single and multiple signals and reports the expected stored count.",
 	)
 	return scenario
 }

@@ -6,175 +6,100 @@ import (
 	"signal"
 )
 
-type caseValidator func(output signalTestOutput) shield.AtomResult
-
-type signalTestOutput struct {
-	operationPanicked     bool
-	operationPanicMessage string
-
-	operationError error
-
-	testError error
-}
-
-func SignalMainUnit(order int) shield.Unit {
-	unit := shield.UnitCreate(order, "Signal")
-	shield.UnitSetDescription(unit, "Validates the entire Signal framework functions as expected.")
-
-	storeUnit := getStoreUnit()
-
-	shield.UnitRegisterSubUnits(unit, storeUnit)
-
-	return *unit
-}
-
-// ------------------------------------------------------------------ UNITS
-
-func getStoreUnit() shield.Unit {
-	storeUnit := shield.UnitCreate(0, "Signal Store")
-	shield.UnitSetDescription(storeUnit, "Validates the signal store system works as intended.")
-
-	setup := func() {
-
-	}
-
-	teardown := func() {
-
-	}
-
-	shield.UnitSetSetupAndTeardown(storeUnit, setup, teardown)
-	creationAtom := getCreationAtom(0)
-	storeAtom := getStoreAtom(1)
-
-	shield.UnitRegisterAtom(storeUnit, creationAtom)
-	shield.UnitRegisterAtom(storeUnit, storeAtom)
-
-	return *storeUnit
-}
-
-// ------ CREATION ------
-
-func getCreationAtom(order int) *shield.Atom[struct{}, signalTestOutput] {
-	creationAtom := shield.AtomCreate(order, "creation", func(_ struct{}) (output signalTestOutput) {
-		defer catchOutputPanic(&output)
-
-		signal.SignalStoreCreate()
-
-		return output
-	})
-	shield.AtomSetDescription(creationAtom, "Validates creation does not panic.")
-
-	panicValidator := getCaseValidator(
-		func(panicMessage string) string {
-			return fmt.Sprintf("unexpected panic during creation: %s", panicMessage)
-		},
-		func(errorMessage string) string {
-			return fmt.Sprintf("unexpected error during creation: %s", errorMessage)
-		},
-	)
-
-	shield.AtomRegisterCase(creationAtom, shield.CaseCreate(
-		"default", struct{}{},
-		func(output signalTestOutput) shield.AtomResult {
-			return panicValidator(output)
-		},
-	))
-
-	return creationAtom
-}
-
-// ------ STORING ------
-
-type storeRunnerCaseInput struct {
+type storeInput struct {
 	signals []signal.Signal
 }
 
-func getStoreAtom(order int) *shield.Atom[storeRunnerCaseInput, signalTestOutput] {
-	runner := func(in storeRunnerCaseInput) (output signalTestOutput) {
-		defer catchOutputPanic(&output)
-
-		store := signal.SignalStoreCreate()
-
-		for _, signalToAdd := range in.signals {
-			err := signal.SignalStoreStore(store, signalToAdd)
-			output.operationError = err
-		}
-
-		signalAmount := signal.SignalStoreStoredAmountGet(store)
-		requiredAmount := len(in.signals)
-		if signalAmount != requiredAmount {
-			output.testError = fmt.Errorf("required signal amount %d, got %d", requiredAmount, signalAmount)
-		}
-
-		return output
+func init() {
+	creationScenario := buildStoreCreationScenario()
+	storeScenario := buildStoreScenario()
+	runCfg := shield.SHIELD_Testing_ScenarioRunConfig{
+		MaxIterations: 1,
 	}
 
-	storeAtom := shield.AtomCreate(order, "store", runner)
-	shield.AtomSetDescription(storeAtom, "Validates the signal store storing functionality works correctly.")
+	operation := shield.SHIELD_Testing_OperationCreateStateless(
+		"signal_store_operation",
+		func(_ struct{}, execCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
+			return []shield.SHIELD_Testing_ScenarioRunResult{
+				shield.SHIELD_Testing_OperationRunScenario(creationScenario, execCtx, runCfg),
+				shield.SHIELD_Testing_OperationRunScenario(storeScenario, execCtx, runCfg),
+			}
+		},
+		"SIGNAL", "Store",
+	)
+	shield.SHIELD_Testing_OperationDescriptionSet(
+		&operation,
+		"Validates Signal store lifecycle behavior, including creation and storing multiple signals.",
+	)
+	shield.SHIELD_Registry_OperationRegister(operation)
+}
 
-	mainValidator := getCaseValidator(
-		func(panicMessage string) string {
-			return fmt.Sprintf("unexpected panic during store operation: %s", panicMessage)
-		},
-		func(errorMessage string) string {
-			return fmt.Sprintf("unexpected error during store operation: %s", errorMessage)
-		},
+func buildStoreCreationScenario() shield.SHIELD_Testing_Scenario[struct{}, bool] {
+	guard := shield.SHIELD_Testing_GuardCreate(
+		"store_creation_does_not_panic",
+		struct{}{},
+		shield.SHIELD_Testing_GuardPolicyMustEqual(
+			func(a, b bool) bool { return a == b },
+			func(item bool) string { return fmt.Sprintf("%t", item) },
+			true,
+		),
 	)
 
-	shield.AtomRegisterCase(storeAtom, shield.CaseCreate(
-		"single", storeRunnerCaseInput{
-			signals: []signal.Signal{
-				*signal.SignalCreate(),
-			},
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"signal_store_create",
+		[]shield.SHIELD_Testing_Guard[struct{}, bool]{guard},
+		func(_ struct{}) (bool, error) {
+			store := signal.SignalStoreCreate()
+			return store != nil, nil
 		},
-		func(output signalTestOutput) shield.AtomResult {
-			return mainValidator(output)
-		},
-	))
-
-	shield.AtomRegisterCase(storeAtom, shield.CaseCreate(
-		"double", storeRunnerCaseInput{
-			signals: []signal.Signal{
-				*signal.SignalCreate(),
-				*signal.SignalCreate(),
-			},
-		},
-		func(output signalTestOutput) shield.AtomResult {
-			return mainValidator(output)
-		},
-	))
-
-	return storeAtom
+	)
+	shield.SHIELD_Testing_ScenarioDescriptionSet(
+		&scenario,
+		"Ensures SignalStoreCreate returns a valid store instance without panicking.",
+	)
+	return scenario
 }
 
-// ------------------------------------------------------------------ VALIDATORS
+func buildStoreScenario() shield.SHIELD_Testing_Scenario[storeInput, int] {
+	guardSingle := shield.SHIELD_Testing_GuardCreate(
+		"store_single_signal",
+		storeInput{
+			signals: []signal.Signal{*signal.SignalCreate()},
+		},
+		shield.SHIELD_Testing_GuardPolicyMustEqual(
+			func(a, b int) bool { return a == b },
+			func(item int) string { return fmt.Sprintf("%d", item) },
+			1,
+		),
+	)
+	guardDouble := shield.SHIELD_Testing_GuardCreate(
+		"store_double_signal",
+		storeInput{
+			signals: []signal.Signal{*signal.SignalCreate(), *signal.SignalCreate()},
+		},
+		shield.SHIELD_Testing_GuardPolicyMustEqual(
+			func(a, b int) bool { return a == b },
+			func(item int) string { return fmt.Sprintf("%d", item) },
+			2,
+		),
+	)
 
-func getCaseValidator(
-	panicMessageFormatter func(panicMessage string) string,
-	errorMessageFormatter func(panicMessage string) string,
-) caseValidator {
-	return func(output signalTestOutput) shield.AtomResult {
-		if output.operationPanicked {
-			return *shield.AtomResultFailureCreate(panicMessageFormatter(output.operationPanicMessage))
-		}
-
-		if output.operationError != nil {
-			return *shield.AtomResultFailureCreate(errorMessageFormatter(output.operationError.Error()))
-		}
-
-		if output.testError != nil {
-			return *shield.AtomResultFailureCreate(fmt.Sprintf("TEST Error: %s", output.testError.Error()))
-		}
-
-		return *shield.AtomResultSuccessCreate()
-	}
-}
-
-// ------------------------------------------------------------------ PRIVATE HELPERS
-
-func catchOutputPanic(output *signalTestOutput) {
-	if r := recover(); r != nil {
-		output.operationPanicked = true
-		output.operationPanicMessage = fmt.Sprintf("%v", r)
-	}
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"signal_store_store",
+		[]shield.SHIELD_Testing_Guard[storeInput, int]{guardSingle, guardDouble},
+		func(input storeInput) (int, error) {
+			store := signal.SignalStoreCreate()
+			for _, signalToAdd := range input.signals {
+				if err := signal.SignalStoreStore(store, signalToAdd); err != nil {
+					return 0, err
+				}
+			}
+			return signal.SignalStoreStoredAmountGet(store), nil
+		},
+	)
+	shield.SHIELD_Testing_ScenarioDescriptionSet(
+		&scenario,
+		"Verifies SignalStoreStore accepts single and multiple signals and reports the expected stored count.",
+	)
+	return scenario
 }

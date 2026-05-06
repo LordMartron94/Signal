@@ -6,6 +6,13 @@ import (
 	"signal"
 )
 
+// Shared Types
+type scenarioInput struct {
+	testSignal signal.Signal
+}
+
+type scenarioOutput struct{}
+
 func init() {
 	operation := shield.SHIELD_Testing_OperationCreateStateless(
 		"operation_signal_to_sink",
@@ -22,108 +29,109 @@ func init() {
 	shield.SHIELD_Registry_OperationRegister(operation)
 }
 
+// --- Scenarios ---
+
 func runFlowScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
-	type scenarioInput struct {
-		testSignal signal.Signal
-	}
-	type scenarioOutput struct{}
-
-	sink := []signal.Signal{}
-	sinkMethod := func(input signal.Signal) {
-		sink = append(sink, input)
-	}
-
-	runConfig := shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1,
-	}
-
-	scenario := shield.SHIELD_Testing_ScenarioCreate(
+	return executeTestScenario(
+		execCtx,
 		"scenario_basic_flow",
 		"Validates a signal can go from: emit -> sink",
-		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
-			shield.SHIELD_Testing_GuardCreate(
-				"guard",
-				scenarioInput{
-					testSignal: signal.SignalCreate("ERROR_001"),
-				},
-				shield.SHIELD_Testing_GuardPolicyPredicate(
-					func(_ scenarioOutput) (passed bool, reason string) {
-						amountStored := len(sink)
-						if amountStored != 1 {
-							return false, fmt.Sprintf("expected 1 stored signal, got %d", amountStored)
-						}
-
-						storedSignal := sink[0]
-						storedID := storedSignal.ID()
-
-						if storedID != "ERROR_001" {
-							return false, fmt.Sprintf("expected ID 'ERROR_001', got '%s'", storedID)
-						}
-
-						return true, ""
-					},
-				),
-			),
-		},
-		func(input scenarioInput) (output scenarioOutput, error error) {
-			dispatcher := signal.SignalDispatcherCreate()
-			signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
-
-			signal.SignalDispatcherEmit(dispatcher, input.testSignal)
-
-			return scenarioOutput{}, nil
-		},
+		"ERROR_001",
+		verifyFlowData,
+		executeFlowAction,
 	)
-
-	return shield.SHIELD_Testing_OperationRunScenario(scenario, execCtx, runConfig)
 }
 
 func runIdempotencyScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
-	type scenarioInput struct {
-		testSignal signal.Signal
+	return executeTestScenario(
+		execCtx,
+		"scenario_sink_idempotency",
+		"Validates that registering the same sink key multiple times is idempotent",
+		"ERROR_002",
+		verifyIdempotencyData,
+		executeIdempotencyAction,
+	)
+}
+
+// --- Specific Scenario Behaviors ---
+
+func verifyFlowData(sink []signal.Signal) (bool, string) {
+	if len(sink) != 1 {
+		return false, fmt.Sprintf("expected 1 stored signal, got %d", len(sink))
 	}
-	type scenarioOutput struct{}
+	if sink[0].ID() != "ERROR_001" {
+		return false, fmt.Sprintf("expected ID 'ERROR_001', got '%s'", sink[0].ID())
+	}
+	return true, ""
+}
+
+func executeFlowAction(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput) {
+	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
+	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
+}
+
+func verifyIdempotencyData(sink []signal.Signal) (bool, string) {
+	if len(sink) != 1 {
+		return false, fmt.Sprintf("expected exactly 1 stored signal despite duplicate registration, got %d", len(sink))
+	}
+	return true, ""
+}
+
+func executeIdempotencyAction(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput) {
+	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
+	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
+	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
+}
+
+// --- Framework Abstraction ---
+
+func executeTestScenario(
+	execCtx shield.SHIELD_Testing_ExecutionContext,
+	name string,
+	description string,
+	signalID string,
+	verifyLogic func(sink []signal.Signal) (bool, string),
+	actionLogic func(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput),
+) shield.SHIELD_Testing_ScenarioRunResult {
 
 	sink := []signal.Signal{}
 	sinkMethod := func(input signal.Signal) {
 		sink = append(sink, input)
 	}
 
-	runConfig := shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1,
-	}
-
 	scenario := shield.SHIELD_Testing_ScenarioCreate(
-		"scenario_sink_idempotency",
-		"Validates that registering the same sink key multiple times is idempotent",
+		name,
+		description,
 		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
-			shield.SHIELD_Testing_GuardCreate(
-				"guard_single_delivery",
-				scenarioInput{
-					testSignal: signal.SignalCreate("ERROR_002"),
-				},
-				shield.SHIELD_Testing_GuardPolicyPredicate(
-					func(_ scenarioOutput) (passed bool, reason string) {
-						amountStored := len(sink)
-						if amountStored != 1 {
-							return false, fmt.Sprintf("expected exactly 1 stored signal despite duplicate registration, got %d", amountStored)
-						}
-						return true, ""
-					},
-				),
-			),
+			createGuard(signalID, &sink, verifyLogic),
 		},
-		func(input scenarioInput) (output scenarioOutput, error error) {
+		func(input scenarioInput) (scenarioOutput, error) {
 			dispatcher := signal.SignalDispatcherCreate()
-
-			signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
-			signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
-
-			signal.SignalDispatcherEmit(dispatcher, input.testSignal)
-
+			actionLogic(dispatcher, sinkMethod, input)
 			return scenarioOutput{}, nil
 		},
 	)
 
-	return shield.SHIELD_Testing_OperationRunScenario(scenario, execCtx, runConfig)
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func createGuard(
+	signalID string,
+	sink *[]signal.Signal,
+	verifyLogic func(sink []signal.Signal) (bool, string),
+) shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput] {
+
+	return shield.SHIELD_Testing_GuardCreate(
+		"guard",
+		scenarioInput{testSignal: signal.SignalCreate(signalID)},
+		shield.SHIELD_Testing_GuardPolicyPredicate(
+			func(_ scenarioOutput) (bool, string) {
+				return verifyLogic(*sink)
+			},
+		),
+	)
 }

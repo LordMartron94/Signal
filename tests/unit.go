@@ -22,6 +22,7 @@ func init() {
 				runFlowScenario(execCtx),
 				runIdempotencyScenario(execCtx),
 				runContextScenario(execCtx),
+				runContextIsolationScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core",
@@ -62,6 +63,17 @@ func runContextScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.S
 		"ERROR_003",
 		verifyContextData,
 		executeContextAction,
+	)
+}
+
+func runContextIsolationScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	return executeTestScenario(
+		execCtx,
+		"scenario_context_isolation",
+		"Validates that context stack correctly isolates scopes after a pop",
+		"ERROR_004",
+		verifyContextIsolationData,
+		executeContextIsolationAction,
 	)
 }
 
@@ -113,6 +125,35 @@ func executeContextAction(dispatcher *signal.SignalDispatcher, sinkMethod func(s
 	signal.SignalDispatcherPushSpan(dispatcher, "Parsing Module")
 	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
 	signal.SignalDispatcherPopSpan(dispatcher)
+}
+
+func verifyContextIsolationData(sink []signal.Signal) (bool, string) {
+	if len(sink) != 1 {
+		return false, fmt.Sprintf("expected 1 stored signal, got %d", len(sink))
+	}
+
+	spanTrace := sink[0].SpanTrace()
+
+	if !slices.Contains(spanTrace, "Phase A") {
+		return false, fmt.Sprintf("expected 'Phase A' in span trace, got %v", spanTrace)
+	}
+
+	if slices.Contains(spanTrace, "Phase B") {
+		return false, fmt.Sprintf("did not expect 'Phase B' in span trace after pop, got %v", spanTrace)
+	}
+
+	return true, ""
+}
+
+func executeContextIsolationAction(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput) {
+	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
+
+	signal.SignalDispatcherPushSpan(dispatcher, "Phase A")
+	signal.SignalDispatcherPushSpan(dispatcher, "Phase B")
+
+	signal.SignalDispatcherPopSpan(dispatcher)
+
+	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
 }
 
 // --- Framework Abstraction ---

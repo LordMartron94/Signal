@@ -16,8 +16,8 @@ func SignalDispatcherCreate() *SignalDispatcher {
 
 type SignalSink = internal.SignalSink
 
-func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, sink SignalSink) {
-	internal.SignalDispatcherRegisterSink(dispatcher, sink)
+func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, key string, sink SignalSink) {
+	internal.SignalDispatcherRegisterSink(dispatcher, key, sink)
 }
 
 func SignalDispatcherEmit(dispatcher *SignalDispatcher, signal Signal) {

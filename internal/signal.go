@@ -19,19 +19,24 @@ func SignalCreate(id string) Signal {
 // ----------------------------------------------------------- SIGNAL DISPATCHER
 
 type SignalDispatcher struct {
-	sinks []SignalSink
+	registeredSinks map[string]struct{}
+	sinks           []SignalSink
 }
 
 func SignalDispatcherCreate() *SignalDispatcher {
 	return &SignalDispatcher{
-		sinks: make([]SignalSink, 0),
+		registeredSinks: make(map[string]struct{}),
+		sinks:           make([]SignalSink, 0),
 	}
 }
 
 type SignalSink = func(input Signal)
 
-func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, sink SignalSink) {
-	dispatcher.sinks = append(dispatcher.sinks, sink)
+func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, key string, sink SignalSink) {
+	if _, exist := dispatcher.registeredSinks[key]; !exist {
+		dispatcher.sinks = append(dispatcher.sinks, sink)
+		dispatcher.registeredSinks[key] = struct{}{}
+	}
 }
 
 func SignalDispatcherEmit(dispatcher *SignalDispatcher, signal Signal) {

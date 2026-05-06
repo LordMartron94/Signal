@@ -1,6 +1,9 @@
 package signal
 
-import "signal/internal"
+import (
+	"essence"
+	"signal/internal"
+)
 
 type Signal = internal.Signal
 
@@ -20,4 +23,8 @@ func SignalStoreStore(store *SignalStore, in Signal) error {
 
 func SignalStoreStoredAmountGet(store *SignalStore) int {
 	return internal.SignalStoreStoredAmountGet(store)
+}
+
+func SignalStoreRemoveByID(store *SignalStore, id essence.UUID) error {
+	return internal.SignalStoreRemoveByID(store, id)
 }

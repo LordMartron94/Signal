@@ -36,7 +36,7 @@ func runFlowScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIE
 		MaxIterations: 1,
 	}
 
-	scenario := shield.SHIELD_Testing_ScenarioCreate[scenarioInput, scenarioOutput](
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
 		"scenario_basic_flow",
 		"Validates a signal can go from: emit -> sink",
 		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{

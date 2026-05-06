@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"shield"
 	"signal"
+	"slices"
 )
 
-// Shared Types
 type scenarioInput struct {
 	testSignal signal.Signal
 }
@@ -21,6 +21,7 @@ func init() {
 			return []shield.SHIELD_Testing_ScenarioRunResult{
 				runFlowScenario(execCtx),
 				runIdempotencyScenario(execCtx),
+				runContextScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core",
@@ -53,6 +54,17 @@ func runIdempotencyScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shie
 	)
 }
 
+func runContextScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	return executeTestScenario(
+		execCtx,
+		"scenario_context",
+		"Validates that context correctly impacts signal span trace",
+		"ERROR_003",
+		verifyContextData,
+		executeContextAction,
+	)
+}
+
 // --- Specific Scenario Behaviors ---
 
 func verifyFlowData(sink []signal.Signal) (bool, string) {
@@ -81,6 +93,26 @@ func executeIdempotencyAction(dispatcher *signal.SignalDispatcher, sinkMethod fu
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
+}
+
+func verifyContextData(sink []signal.Signal) (bool, string) {
+	if len(sink) != 1 {
+		return false, fmt.Sprintf("expected 1 stored signal, got %d", len(sink))
+	}
+
+	spanTrace := sink[0].SpanTrace()
+	if !slices.Contains(spanTrace, "Parsing Module") {
+		return false, fmt.Sprintf("expected 'Parsing Module' in span trace, got %v", spanTrace)
+	}
+
+	return true, ""
+}
+
+func executeContextAction(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput) {
+	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
+	signal.SignalDispatcherPushSpan(dispatcher, "Parsing Module")
+	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
+	signal.SignalDispatcherPopSpan(dispatcher)
 }
 
 // --- Framework Abstraction ---

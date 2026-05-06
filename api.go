@@ -23,3 +23,11 @@ func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, key string, sink
 func SignalDispatcherEmit(dispatcher *SignalDispatcher, signal Signal) {
 	internal.SignalDispatcherEmit(dispatcher, signal)
 }
+
+func SignalDispatcherPushSpan(dispatcher *SignalDispatcher, span string) {
+	internal.SignalDispatcherPushSpan(dispatcher, span)
+}
+
+func SignalDispatcherPopSpan(dispatcher *SignalDispatcher) {
+	internal.SignalDispatcherPopSpan(dispatcher)
+}

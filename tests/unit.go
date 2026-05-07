@@ -8,7 +8,7 @@ import (
 )
 
 type scenarioInput struct {
-	testSignal signal.Signal
+	signalID string
 }
 
 type scenarioOutput struct{}
@@ -91,7 +91,10 @@ func verifyFlowData(sink []signal.Signal) (bool, string) {
 
 func executeFlowAction(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput) {
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
-	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
+
+	ctx := signal.SignalContextCreate(dispatcher)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+	signal.SignalContextEmit(ctx, testSignal)
 }
 
 func verifyIdempotencyData(sink []signal.Signal) (bool, string) {
@@ -104,7 +107,10 @@ func verifyIdempotencyData(sink []signal.Signal) (bool, string) {
 func executeIdempotencyAction(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput) {
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
-	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
+
+	ctx := signal.SignalContextCreate(dispatcher)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+	signal.SignalContextEmit(ctx, testSignal)
 }
 
 func verifyContextData(sink []signal.Signal) (bool, string) {
@@ -122,9 +128,15 @@ func verifyContextData(sink []signal.Signal) (bool, string) {
 
 func executeContextAction(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput) {
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
-	signal.SignalDispatcherPushSpan(dispatcher, "Parsing Module")
-	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
-	signal.SignalDispatcherPopSpan(dispatcher)
+
+	ctx := signal.SignalContextCreate(dispatcher)
+
+	signal.SignalContextPushSpan(ctx, "Parsing Module")
+
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+	signal.SignalContextEmit(ctx, testSignal)
+
+	signal.SignalContextPopSpan(ctx)
 }
 
 func verifyContextIsolationData(sink []signal.Signal) (bool, string) {
@@ -148,12 +160,15 @@ func verifyContextIsolationData(sink []signal.Signal) (bool, string) {
 func executeContextIsolationAction(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput) {
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 
-	signal.SignalDispatcherPushSpan(dispatcher, "Phase A")
-	signal.SignalDispatcherPushSpan(dispatcher, "Phase B")
+	ctx := signal.SignalContextCreate(dispatcher)
 
-	signal.SignalDispatcherPopSpan(dispatcher)
+	signal.SignalContextPushSpan(ctx, "Phase A")
+	signal.SignalContextPushSpan(ctx, "Phase B")
 
-	signal.SignalDispatcherEmit(dispatcher, input.testSignal)
+	signal.SignalContextPopSpan(ctx)
+
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+	signal.SignalContextEmit(ctx, testSignal)
 }
 
 // --- Framework Abstraction ---
@@ -200,7 +215,7 @@ func createGuard(
 
 	return shield.SHIELD_Testing_GuardCreate(
 		"guard",
-		scenarioInput{testSignal: signal.SignalCreate(signalID)},
+		scenarioInput{signalID: signalID},
 		shield.SHIELD_Testing_GuardPolicyPredicate(
 			func(_ scenarioOutput) (bool, string) {
 				return verifyLogic(*sink)

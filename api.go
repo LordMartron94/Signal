@@ -4,10 +4,6 @@ import "signal/internal"
 
 type Signal = internal.Signal
 
-func SignalCreate(id string) Signal {
-	return internal.SignalCreate(id)
-}
-
 type SignalDispatcher = internal.SignalDispatcher
 
 func SignalDispatcherCreate() *SignalDispatcher {
@@ -20,14 +16,24 @@ func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, key string, sink
 	internal.SignalDispatcherRegisterSink(dispatcher, key, sink)
 }
 
-func SignalDispatcherEmit(dispatcher *SignalDispatcher, signal Signal) {
-	internal.SignalDispatcherEmit(dispatcher, signal)
+type SignalContext = internal.SignalContext
+
+func SignalContextCreate(dispatcher *SignalDispatcher) *SignalContext {
+	return internal.SignalContextCreate(dispatcher)
 }
 
-func SignalDispatcherPushSpan(dispatcher *SignalDispatcher, span string) {
-	internal.SignalDispatcherPushSpan(dispatcher, span)
+func SignalContextPushSpan(ctx *SignalContext, span string) {
+	internal.SignalContextPushSpan(ctx, span)
 }
 
-func SignalDispatcherPopSpan(dispatcher *SignalDispatcher) {
-	internal.SignalDispatcherPopSpan(dispatcher)
+func SignalContextPopSpan(ctx *SignalContext) {
+	internal.SignalContextPopSpan(ctx)
+}
+
+func SignalContextSignalCreate(ctx *SignalContext, signalID string) Signal {
+	return internal.SignalContextSignalCreate(ctx, signalID)
+}
+
+func SignalContextEmit(ctx *SignalContext, signal Signal) {
+	internal.SignalContextEmit(ctx, signal)
 }

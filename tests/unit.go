@@ -5,6 +5,7 @@ import (
 	"shield"
 	"signal"
 	"slices"
+	"sync"
 )
 
 type scenarioInput struct {
@@ -23,6 +24,7 @@ func init() {
 				runIdempotencyScenario(execCtx),
 				runContextScenario(execCtx),
 				runContextIsolationScenario(execCtx),
+				runConcurrencyScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core",
@@ -74,6 +76,64 @@ func runContextIsolationScenario(execCtx shield.SHIELD_Testing_ExecutionContext)
 		"ERROR_004",
 		verifyContextIsolationData,
 		executeContextIsolationAction,
+	)
+}
+
+func runConcurrencyScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		signalID string
+	}
+	type scenarioOutput struct{}
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_dispatcher_concurrency",
+		"Validates that the dispatcher can handle concurrent registrations and emissions",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"guard_thread_safe",
+				scenarioInput{signalID: "ERROR_CONCURRENT"},
+				shield.SHIELD_Testing_GuardPolicyMustNotPanic[scenarioOutput](),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			dispatcher := signal.SignalDispatcherCreate()
+
+			var observerMutex sync.Mutex
+			var emissionsCaptured int
+
+			safeSinkMethod := func(sig signal.Signal) {
+				observerMutex.Lock()
+				defer observerMutex.Unlock()
+				emissionsCaptured++
+			}
+
+			var wg sync.WaitGroup
+			workers := 100
+
+			for i := 0; i < workers; i++ {
+				wg.Add(1)
+				go func(workerID int) {
+					defer wg.Done()
+
+					workerKey := fmt.Sprintf("worker_sink_%d", workerID)
+					signal.SignalDispatcherRegisterSink(dispatcher, workerKey, safeSinkMethod)
+
+					ctx := signal.SignalContextCreate(dispatcher)
+					testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+					signal.SignalContextEmit(ctx, testSignal)
+				}(i)
+			}
+
+			wg.Wait()
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
 	)
 }
 

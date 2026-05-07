@@ -1,5 +1,7 @@
 package internal
 
+import "sync"
+
 // ----------------------------------------------------------- SIGNAL
 
 type Signal struct {
@@ -18,6 +20,7 @@ func (s *Signal) SpanTrace() []string {
 // ----------------------------------------------------------- SIGNAL DISPATCHER
 
 type SignalDispatcher struct {
+	mutex           sync.RWMutex
 	registeredSinks map[string]struct{}
 	sinks           []SignalSink
 }
@@ -26,12 +29,16 @@ func SignalDispatcherCreate() *SignalDispatcher {
 	return &SignalDispatcher{
 		registeredSinks: make(map[string]struct{}),
 		sinks:           make([]SignalSink, 0),
+		mutex:           sync.RWMutex{},
 	}
 }
 
 type SignalSink = func(input Signal)
 
 func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, key string, sink SignalSink) {
+	dispatcher.mutex.Lock()
+	defer dispatcher.mutex.Unlock()
+
 	if _, exist := dispatcher.registeredSinks[key]; !exist {
 		dispatcher.sinks = append(dispatcher.sinks, sink)
 		dispatcher.registeredSinks[key] = struct{}{}
@@ -39,6 +46,9 @@ func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, key string, sink
 }
 
 func signalDispatcherEmit(dispatcher *SignalDispatcher, signal Signal) {
+	dispatcher.mutex.RLock()
+	defer dispatcher.mutex.RUnlock()
+
 	for _, sink := range dispatcher.sinks {
 		sink(signal)
 	}

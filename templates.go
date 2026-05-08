@@ -1,13 +1,12 @@
 package signal
 
 /*
-This file provides some templates for the category manifests.
+DiagnosticCategoryManifest_Logging provides a standard logging-oriented category manifest.
 
-In order to prevent typos, it is recommended to either:
-A) Create constants for the different labels.
-B) Create a typed abstraction that resolves to the correct labels if safety is preferred over performance.
+[Context]
+Use this when integrating Signal as a generic application logging pipeline.
+It defines conventional severities from TRACE through FATAL with increasing weights.
 */
-
 var DiagnosticCategoryManifest_Logging = DiagnosticCategoryManifest{
 	{
 		Label:  "TRACE",
@@ -39,6 +38,12 @@ var DiagnosticCategoryManifest_Logging = DiagnosticCategoryManifest{
 	},
 }
 
+/*
+DiagnosticCategoryManifest_LSP provides a language-server-style diagnostics category manifest.
+
+[Context]
+Use this for editor or LSP diagnostic flows where categories map to hint/information/warning/error severities.
+*/
 var DiagnosticCategoryManifest_LSP = DiagnosticCategoryManifest{
 	{
 		Label:  "HINT",

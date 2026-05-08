@@ -31,28 +31,46 @@ type Signal struct {
 }
 
 /*
-ID returns the current signal's ID
+ID returns the stable signal identifier.
+
+[Context]
+This ID is producer-defined and is typically used for machine-readable grouping or filtering.
+
+[Side Effects]
+Pure method. No side effects.
 */
 func (s *Signal) ID() string {
 	return s.id
 }
 
 /*
-SpanTrace returns the signal's spantrace.
+SpanTrace returns the captured provenance stack for the signal.
+
+[Returns]
+Returns the span sequence from outermost to innermost scope at signal creation time.
+
+[Side Effects]
+Pure method. No side effects.
 */
 func (s *Signal) SpanTrace() []string {
 	return s.spanTrace
 }
 
 /*
-DiagnosticCategory returns the diagnostic category for this trace.
+DiagnosticCategory returns the signal severity/category label.
+
+[Side Effects]
+Pure method. No side effects.
 */
 func (s *Signal) DiagnosticCategory() DiagnosticCategory {
 	return s.diagnosticCategory
 }
 
 /*
-Timestamp returns the time at which the signal was created.
+Timestamp returns the creation time of the signal.
+
+[Side Effects]
+Pure method. No side effects.
 */
 func (s *Signal) Timestamp() time.Time {
 	return s.timestamp

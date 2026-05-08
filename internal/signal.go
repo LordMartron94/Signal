@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
 	"time"
 )
@@ -175,6 +176,15 @@ func SignalContextCreate(dispatcher *SignalDispatcher) *SignalContext {
 	}
 }
 
+func SignalContextClone(ctx *SignalContext) *SignalContext {
+	spanStackCopy := slices.Clone(ctx.spanStack)
+
+	return &SignalContext{
+		dispatcher: ctx.dispatcher,
+		spanStack:  spanStackCopy,
+	}
+}
+
 func SignalContextPushSpan(ctx *SignalContext, span string) {
 	ctx.spanStack = append(ctx.spanStack, span)
 }
@@ -191,9 +201,7 @@ func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCa
 		panic(fmt.Errorf("unknown diagnostic category '%s', did you forget to declare it in the manifest?", diagnosticCategory))
 	}
 
-	traceCopy := make([]string, len(ctx.spanStack))
-	copy(traceCopy, ctx.spanStack)
-
+	traceCopy := slices.Clone(ctx.spanStack)
 	payloadCopy := maps.Clone(payload)
 
 	return Signal{

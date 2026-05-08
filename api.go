@@ -38,6 +38,10 @@ func SignalContextCreate(dispatcher *SignalDispatcher) *SignalContext {
 	return internal.SignalContextCreate(dispatcher)
 }
 
+func SignalContextClone(ctx *SignalContext) *SignalContext {
+	return internal.SignalContextClone(ctx)
+}
+
 func SignalContextPushSpan(ctx *SignalContext, span string) {
 	internal.SignalContextPushSpan(ctx, span)
 }

@@ -41,6 +41,7 @@ func init() {
 				runConcurrencyScenario(execCtx),
 				runPayloadAccessorScenario(execCtx),
 				runTimestampScenario(execCtx),
+				runContextForkConcurrencyScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core",
@@ -62,6 +63,118 @@ func init() {
 
 	shield.SHIELD_Registry_OperationRegister(flowOperation)
 	shield.SHIELD_Registry_OperationRegister(diagnosticCategoryOperation)
+}
+
+func runContextForkConcurrencyScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		signalID string
+	}
+	type scenarioOutput struct{}
+
+	var observerSink []signal.Signal
+	var observerMutex sync.Mutex
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_context_fork_concurrency",
+		"Validates that forked contexts inherit state but isolate mutations safely across goroutines",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"guard_thread_safe_isolation",
+				scenarioInput{signalID: "ERROR_FORK_CONCURRENT"},
+				shield.SHIELD_Testing_GuardPolicyMustNotPanic[scenarioOutput](),
+				shield.SHIELD_Testing_GuardPolicyPredicate(func(_ scenarioOutput) (passed bool, reason string) {
+					expectedWorkers := 100
+
+					if len(observerSink) != expectedWorkers {
+						return false, fmt.Sprintf("expected %d signals, got %d", expectedWorkers, len(observerSink))
+					}
+
+					seenWorkers := make(map[string]struct{})
+
+					for _, sig := range observerSink {
+						trace := sig.SpanTrace()
+
+						if len(trace) != 2 {
+							return false, fmt.Sprintf("expected trace length 2, got %d: %v", len(trace), trace)
+						}
+						if trace[0] != "Root Span" {
+							return false, fmt.Sprintf("expected first span to be 'Root Span', got '%s'", trace[0])
+						}
+
+						workerSpan := trace[1]
+						if _, exists := seenWorkers[workerSpan]; exists {
+							return false, fmt.Sprintf("cross-contamination or race detected: duplicate worker span '%s'", workerSpan)
+						}
+						seenWorkers[workerSpan] = struct{}{}
+					}
+
+					return true, ""
+				}),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			dispatcher := signal.SignalDispatcherCreate(defaultManifest)
+
+			signal.SignalDispatcherRegisterSink(dispatcher, "observer", func(sig signal.Signal) {
+				observerMutex.Lock()
+				defer observerMutex.Unlock()
+				observerSink = append(observerSink, sig)
+			})
+
+			rootCtx := signal.SignalContextCreate(dispatcher)
+			signal.SignalContextPushSpan(rootCtx, "Root Span")
+
+			var wg sync.WaitGroup
+			workers := 100
+			panicChan := make(chan interface{}, 1)
+
+			for i := 0; i < workers; i++ {
+				wg.Add(1)
+				go func(workerID int) {
+					defer wg.Done()
+
+					defer func() {
+						if r := recover(); r != nil {
+							select {
+							case panicChan <- r:
+							default:
+							}
+						}
+					}()
+
+					childCtx := signal.SignalContextClone(rootCtx)
+
+					workerSpan := fmt.Sprintf("Worker_%d", workerID)
+					signal.SignalContextPushSpan(childCtx, workerSpan)
+
+					testSignal := signal.SignalContextSignalCreate(childCtx, input.signalID, "ERROR", nil)
+					signal.SignalContextEmit(childCtx, testSignal)
+				}(i)
+			}
+
+			wg.Wait()
+
+			select {
+			case p := <-panicChan:
+				panic(p)
+			default:
+			}
+
+			rootSignal := signal.SignalContextSignalCreate(rootCtx, "ROOT_FINAL", "ERROR", nil)
+			rootTrace := rootSignal.SpanTrace()
+			if len(rootTrace) != 1 || rootTrace[0] != "Root Span" {
+				panic(fmt.Sprintf("Root context contaminated: %v", rootTrace))
+			}
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
 }
 
 // --- Scenarios ---

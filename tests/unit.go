@@ -6,6 +6,7 @@ import (
 	"signal"
 	"slices"
 	"sync"
+	"time"
 )
 
 type scenarioInput struct {
@@ -39,6 +40,7 @@ func init() {
 				runContextIsolationScenario(execCtx),
 				runConcurrencyScenario(execCtx),
 				runPayloadAccessorScenario(execCtx),
+				runTimestampScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core",
@@ -406,6 +408,70 @@ func runPayloadAccessorScenario(execCtx shield.SHIELD_Testing_ExecutionContext) 
 			ctx := signal.SignalContextCreate(dispatcher)
 
 			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", input.payload)
+			signal.SignalContextEmit(ctx, testSignal)
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func runTimestampScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		signalID string
+	}
+	type scenarioOutput struct{}
+
+	var observerSink []signal.Signal
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_signal_timestamp",
+		"Validates that a signal captures a precise creation timestamp",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"guard_timestamp",
+				scenarioInput{
+					signalID: "ERROR_TIMESTAMP",
+				},
+				shield.SHIELD_Testing_GuardPolicyPredicate(func(_ scenarioOutput) (passed bool, reason string) {
+					if len(observerSink) != 1 {
+						return false, "expected observer sink to capture exactly 1 signal"
+					}
+
+					sig := observerSink[0]
+					stamp := sig.Timestamp()
+
+					if stamp.IsZero() {
+						return false, "expected signal timestamp to be non-zero"
+					}
+
+					delta := time.Since(stamp)
+					if delta < 0 {
+						return false, fmt.Sprintf("timestamp is in the future (delta: %v)", delta)
+					}
+					if delta > time.Second {
+						return false, fmt.Sprintf("timestamp is too old, indicating it was not captured at creation (delta: %v)", delta)
+					}
+
+					return true, ""
+				}),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			dispatcher := signal.SignalDispatcherCreate(defaultManifest)
+
+			signal.SignalDispatcherRegisterSink(dispatcher, "observer", func(sig signal.Signal) {
+				observerSink = append(observerSink, sig)
+			})
+
+			ctx := signal.SignalContextCreate(dispatcher)
+
+			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", nil)
 			signal.SignalContextEmit(ctx, testSignal)
 
 			return scenarioOutput{}, nil

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"sync"
+	"time"
 )
 
 // ----------------------------------------------------------- DIAGNOSTIC CATEGORY
@@ -25,18 +26,35 @@ type Signal struct {
 	spanTrace          []string
 	diagnosticCategory DiagnosticCategory
 	payload            map[string]any
+	timestamp          time.Time
 }
 
+/*
+ID returns the current signal's ID
+*/
 func (s *Signal) ID() string {
 	return s.id
 }
 
+/*
+SpanTrace returns the signal's spantrace.
+*/
 func (s *Signal) SpanTrace() []string {
 	return s.spanTrace
 }
 
+/*
+DiagnosticCategory returns the diagnostic category for this trace.
+*/
 func (s *Signal) DiagnosticCategory() DiagnosticCategory {
 	return s.diagnosticCategory
+}
+
+/*
+Timestamp returns the time at which the signal was created.
+*/
+func (s *Signal) Timestamp() time.Time {
+	return s.timestamp
 }
 
 func SignalPayloadGet(signal *Signal, key string) (value any, error error) {
@@ -183,6 +201,7 @@ func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCa
 		spanTrace:          traceCopy,
 		diagnosticCategory: diagnosticCategory,
 		payload:            payloadCopy,
+		timestamp:          time.Now(),
 	}
 }
 

@@ -10,12 +10,23 @@ import (
 
 type scenarioInput struct {
 	signalID string
+
+	diagnosticCategoryManifest signal.DiagnosticCategoryManifest
 }
 
 type scenarioOutput struct{}
 
+var defaultManifest = signal.DiagnosticCategoryManifest{
+	{
+		Label: "",
+	},
+	{
+		Label: "ERROR",
+	},
+}
+
 func init() {
-	operation := shield.SHIELD_Testing_OperationCreateStateless(
+	flowOperation := shield.SHIELD_Testing_OperationCreateStateless(
 		"operation_signal_to_sink",
 		"Validates that a signal can flow from emission to sink properly",
 		func(_ struct{}, execCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
@@ -30,7 +41,21 @@ func init() {
 		"SIGNAL", "core",
 	)
 
-	shield.SHIELD_Registry_OperationRegister(operation)
+	diagnosticCategoryOperation := shield.SHIELD_Testing_OperationCreateStateless(
+		"operation_diagnostic_category",
+		"Validates that the library can handle (custom) diagnostic categories properly",
+		func(_ struct{}, execCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
+			return []shield.SHIELD_Testing_ScenarioRunResult{
+				runDiagnosticCategoryFlowScenario(execCtx),
+				runDiagnosticCategoryUnknownManifestPanicScenario(execCtx),
+				runDiagnosticDuplicateCategoryScenario(execCtx),
+			}
+		},
+		"SIGNAL", "core", "diagnostic_categories",
+	)
+
+	shield.SHIELD_Registry_OperationRegister(flowOperation)
+	shield.SHIELD_Registry_OperationRegister(diagnosticCategoryOperation)
 }
 
 // --- Scenarios ---
@@ -96,10 +121,12 @@ func runConcurrencyScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shie
 			),
 		},
 		func(input scenarioInput) (scenarioOutput, error) {
-			dispatcher := signal.SignalDispatcherCreate()
+			dispatcher := signal.SignalDispatcherCreate(defaultManifest)
 
 			var observerMutex sync.Mutex
 			var emissionsCaptured int
+
+			panicChan := make(chan interface{}, 1)
 
 			safeSinkMethod := func(sig signal.Signal) {
 				observerMutex.Lock()
@@ -115,16 +142,113 @@ func runConcurrencyScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shie
 				go func(workerID int) {
 					defer wg.Done()
 
+					defer func() {
+						if r := recover(); r != nil {
+							select {
+							case panicChan <- r:
+							default:
+
+							}
+						}
+					}()
+
 					workerKey := fmt.Sprintf("worker_sink_%d", workerID)
 					signal.SignalDispatcherRegisterSink(dispatcher, workerKey, safeSinkMethod)
 
 					ctx := signal.SignalContextCreate(dispatcher)
-					testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+					testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
 					signal.SignalContextEmit(ctx, testSignal)
 				}(i)
 			}
 
 			wg.Wait()
+
+			select {
+			case p := <-panicChan:
+				panic(p)
+			default:
+			}
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func runDiagnosticCategoryFlowScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	return executeTestScenario(
+		execCtx,
+		"scenario_signal_diagnostic_category_flow",
+		"Validates that the signal library persists diagnostic category in signal",
+		"ERROR_005",
+		verifyDiagCatFlowData,
+		executeDiagFlowAction,
+	)
+}
+
+func runDiagnosticCategoryUnknownManifestPanicScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		signalID string
+	}
+	type scenarioOutput struct{}
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_signal_diagnostic_category_unknown",
+		"Validates that the library panics when an unknown diagnostic category is presented",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"must_panic",
+				scenarioInput{signalID: "ERROR_006"},
+				shield.SHIELD_Testing_GuardPolicyMustPanic[scenarioOutput](),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			dispatcher := signal.SignalDispatcherCreate(signal.DiagnosticCategoryManifest{})
+			ctx := signal.SignalContextCreate(dispatcher)
+			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR")
+			signal.SignalContextEmit(ctx, testSignal)
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func runDiagnosticDuplicateCategoryScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		signalID string
+	}
+	type scenarioOutput struct{}
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_signal_diagnostic_category_duplicate",
+		"Validates that the library panics when the manifest contains a duplicate diagnostic category label",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"must_panic",
+				scenarioInput{signalID: "ERROR_007"},
+				shield.SHIELD_Testing_GuardPolicyMustPanic[scenarioOutput](),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			_ = signal.SignalDispatcherCreate(signal.DiagnosticCategoryManifest{
+				{
+					Label: "ERROR",
+				},
+				{
+					Label: "ERROR",
+				},
+			})
 
 			return scenarioOutput{}, nil
 		},
@@ -153,7 +277,7 @@ func executeFlowAction(dispatcher *signal.SignalDispatcher, sinkMethod func(sign
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 
 	ctx := signal.SignalContextCreate(dispatcher)
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
 	signal.SignalContextEmit(ctx, testSignal)
 }
 
@@ -169,7 +293,7 @@ func executeIdempotencyAction(dispatcher *signal.SignalDispatcher, sinkMethod fu
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 
 	ctx := signal.SignalContextCreate(dispatcher)
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
 	signal.SignalContextEmit(ctx, testSignal)
 }
 
@@ -193,7 +317,7 @@ func executeContextAction(dispatcher *signal.SignalDispatcher, sinkMethod func(s
 
 	signal.SignalContextPushSpan(ctx, "Parsing Module")
 
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
 	signal.SignalContextEmit(ctx, testSignal)
 
 	signal.SignalContextPopSpan(ctx)
@@ -227,7 +351,29 @@ func executeContextIsolationAction(dispatcher *signal.SignalDispatcher, sinkMeth
 
 	signal.SignalContextPopSpan(ctx)
 
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
+	signal.SignalContextEmit(ctx, testSignal)
+}
+
+func verifyDiagCatFlowData(sink []signal.Signal) (bool, string) {
+	if len(sink) != 1 {
+		return false, fmt.Sprintf("expected 1 stored signal, got %d", len(sink))
+	}
+
+	diagnosticCategory := sink[0].DiagnosticCategory()
+
+	if diagnosticCategory != "ERROR" {
+		return false, fmt.Sprintf("expected diagnostic category to be 'ERROR', got '%s'", diagnosticCategory)
+	}
+
+	return true, ""
+}
+
+func executeDiagFlowAction(dispatcher *signal.SignalDispatcher, sinkMethod func(signal.Signal), input scenarioInput) {
+	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
+
+	ctx := signal.SignalContextCreate(dispatcher)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR")
 	signal.SignalContextEmit(ctx, testSignal)
 }
 
@@ -254,7 +400,7 @@ func executeTestScenario(
 			createGuard(signalID, &sink, verifyLogic),
 		},
 		func(input scenarioInput) (scenarioOutput, error) {
-			dispatcher := signal.SignalDispatcherCreate()
+			dispatcher := signal.SignalDispatcherCreate(input.diagnosticCategoryManifest)
 			actionLogic(dispatcher, sinkMethod, input)
 			return scenarioOutput{}, nil
 		},
@@ -275,7 +421,7 @@ func createGuard(
 
 	return shield.SHIELD_Testing_GuardCreate(
 		"guard",
-		scenarioInput{signalID: signalID},
+		scenarioInput{signalID: signalID, diagnosticCategoryManifest: defaultManifest},
 		shield.SHIELD_Testing_GuardPolicyPredicate(
 			func(_ scenarioOutput) (bool, string) {
 				return verifyLogic(*sink)

@@ -2,12 +2,16 @@ package signal
 
 import "signal/internal"
 
+type DiagnosticCategory = internal.DiagnosticCategory
+
+type DiagnosticCategoryManifest = internal.DiagnosticCategoryManifest
+
 type Signal = internal.Signal
 
 type SignalDispatcher = internal.SignalDispatcher
 
-func SignalDispatcherCreate() *SignalDispatcher {
-	return internal.SignalDispatcherCreate()
+func SignalDispatcherCreate(manifest DiagnosticCategoryManifest) *SignalDispatcher {
+	return internal.SignalDispatcherCreate(manifest)
 }
 
 type SignalSink = internal.SignalSink
@@ -30,8 +34,8 @@ func SignalContextPopSpan(ctx *SignalContext) {
 	internal.SignalContextPopSpan(ctx)
 }
 
-func SignalContextSignalCreate(ctx *SignalContext, signalID string) Signal {
-	return internal.SignalContextSignalCreate(ctx, signalID)
+func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory) Signal {
+	return internal.SignalContextSignalCreate(ctx, signalID, diagnosticCategory)
 }
 
 func SignalContextEmit(ctx *SignalContext, signal Signal) {

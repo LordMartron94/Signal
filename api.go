@@ -8,6 +8,14 @@ type DiagnosticCategoryManifest = internal.DiagnosticCategoryManifest
 
 type Signal = internal.Signal
 
+func SignalPayloadGet(signal *Signal, key string) (value any, error error) {
+	return internal.SignalPayloadGet(signal, key)
+}
+
+func SignalPayloadGetAs[TValue any](signal *Signal, key string) (value TValue, error error) {
+	return internal.SignalPayloadGetAs[TValue](signal, key)
+}
+
 type SignalDispatcher = internal.SignalDispatcher
 
 func SignalDispatcherCreate(manifest DiagnosticCategoryManifest) *SignalDispatcher {
@@ -38,8 +46,8 @@ func SignalContextPopSpan(ctx *SignalContext) {
 	internal.SignalContextPopSpan(ctx)
 }
 
-func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory) Signal {
-	return internal.SignalContextSignalCreate(ctx, signalID, diagnosticCategory)
+func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory, payload map[string]any) Signal {
+	return internal.SignalContextSignalCreate(ctx, signalID, diagnosticCategory, payload)
 }
 
 func SignalContextEmit(ctx *SignalContext, signal Signal) {

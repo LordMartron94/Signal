@@ -38,6 +38,7 @@ func init() {
 				runContextScenario(execCtx),
 				runContextIsolationScenario(execCtx),
 				runConcurrencyScenario(execCtx),
+				runPayloadAccessorScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core",
@@ -159,7 +160,7 @@ func runConcurrencyScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shie
 					signal.SignalDispatcherRegisterSink(dispatcher, workerKey, safeSinkMethod)
 
 					ctx := signal.SignalContextCreate(dispatcher)
-					testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
+					testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
 					signal.SignalContextEmit(ctx, testSignal)
 				}(i)
 			}
@@ -213,7 +214,7 @@ func runDiagnosticCategoryUnknownManifestPanicScenario(execCtx shield.SHIELD_Tes
 		func(input scenarioInput) (scenarioOutput, error) {
 			dispatcher := signal.SignalDispatcherCreate(signal.DiagnosticCategoryManifest{})
 			ctx := signal.SignalContextCreate(dispatcher)
-			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR")
+			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", nil)
 			signal.SignalContextEmit(ctx, testSignal)
 
 			return scenarioOutput{}, nil
@@ -316,11 +317,96 @@ func runDiagnosticSinkFilterScenario(execCtx shield.SHIELD_Testing_ExecutionCont
 			signal.SignalDispatcherRegisterFilteredSink(dispatcher, "memory", sinkMethod, 10)
 
 			ctx := signal.SignalContextCreate(dispatcher)
-			testInfoSignal := signal.SignalContextSignalCreate(ctx, input.infoID, "INFO")
-			testErrorSignal := signal.SignalContextSignalCreate(ctx, input.errorID, "ERROR")
+			testInfoSignal := signal.SignalContextSignalCreate(ctx, input.infoID, "INFO", nil)
+			testErrorSignal := signal.SignalContextSignalCreate(ctx, input.errorID, "ERROR", nil)
 
 			signal.SignalContextEmit(ctx, testInfoSignal)
 			signal.SignalContextEmit(ctx, testErrorSignal)
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func runPayloadAccessorScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		signalID string
+		payload  map[string]any
+	}
+	type scenarioOutput struct{}
+
+	var observerSink []signal.Signal
+	var observerMutex sync.Mutex
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_signal_payload_accessors",
+		"Validates the safe extraction of payload data via accessors, including type safety and missing keys",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"guard_payload_access",
+				scenarioInput{
+					signalID: "ERROR_PAYLOAD_ACCESS",
+					payload: map[string]any{
+						"retry_count": 5,
+						"module_name": "auth",
+					},
+				},
+				shield.SHIELD_Testing_GuardPolicyPredicate(func(_ scenarioOutput) (passed bool, reason string) {
+					if len(observerSink) != 1 {
+						return false, "expected observer sink to capture exactly 1 signal"
+					}
+
+					sig := observerSink[0]
+
+					val, err := signal.SignalPayloadGet(&sig, "module_name")
+					if err != nil {
+						return false, fmt.Sprintf("expected no error for 'module_name', got: %v", err)
+					}
+					if val != "auth" {
+						return false, fmt.Sprintf("expected 'auth', got: %v", val)
+					}
+
+					retries, err := signal.SignalPayloadGetAs[int](&sig, "retry_count")
+					if err != nil {
+						return false, fmt.Sprintf("expected no error for 'retry_count', got: %v", err)
+					}
+					if retries != 5 {
+						return false, fmt.Sprintf("expected 5, got: %d", retries)
+					}
+
+					_, err = signal.SignalPayloadGet(&sig, "non_existent")
+					if err == nil {
+						return false, "expected error for missing key, got nil"
+					}
+
+					_, err = signal.SignalPayloadGetAs[string](&sig, "retry_count") // Requesting int as string
+					if err == nil {
+						return false, "expected error for type mismatch, got nil"
+					}
+
+					return true, ""
+				}),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			dispatcher := signal.SignalDispatcherCreate(defaultManifest)
+
+			signal.SignalDispatcherRegisterSink(dispatcher, "observer", func(sig signal.Signal) {
+				observerMutex.Lock()
+				defer observerMutex.Unlock()
+				observerSink = append(observerSink, sig)
+			})
+
+			ctx := signal.SignalContextCreate(dispatcher)
+
+			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", input.payload)
+			signal.SignalContextEmit(ctx, testSignal)
 
 			return scenarioOutput{}, nil
 		},
@@ -349,7 +435,7 @@ func executeFlowAction(dispatcher *signal.SignalDispatcher, sinkMethod func(sign
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 
 	ctx := signal.SignalContextCreate(dispatcher)
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
 	signal.SignalContextEmit(ctx, testSignal)
 }
 
@@ -365,7 +451,7 @@ func executeIdempotencyAction(dispatcher *signal.SignalDispatcher, sinkMethod fu
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 
 	ctx := signal.SignalContextCreate(dispatcher)
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
 	signal.SignalContextEmit(ctx, testSignal)
 }
 
@@ -389,7 +475,7 @@ func executeContextAction(dispatcher *signal.SignalDispatcher, sinkMethod func(s
 
 	signal.SignalContextPushSpan(ctx, "Parsing Module")
 
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
 	signal.SignalContextEmit(ctx, testSignal)
 
 	signal.SignalContextPopSpan(ctx)
@@ -423,7 +509,7 @@ func executeContextIsolationAction(dispatcher *signal.SignalDispatcher, sinkMeth
 
 	signal.SignalContextPopSpan(ctx)
 
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "")
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
 	signal.SignalContextEmit(ctx, testSignal)
 }
 
@@ -445,7 +531,7 @@ func executeDiagFlowAction(dispatcher *signal.SignalDispatcher, sinkMethod func(
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 
 	ctx := signal.SignalContextCreate(dispatcher)
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR")
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", nil)
 	signal.SignalContextEmit(ctx, testSignal)
 }
 

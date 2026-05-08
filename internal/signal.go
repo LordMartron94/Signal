@@ -3,6 +3,7 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 )
 
@@ -23,6 +24,7 @@ type Signal struct {
 	id                 string
 	spanTrace          []string
 	diagnosticCategory DiagnosticCategory
+	payload            map[string]any
 }
 
 func (s *Signal) ID() string {
@@ -35,6 +37,30 @@ func (s *Signal) SpanTrace() []string {
 
 func (s *Signal) DiagnosticCategory() DiagnosticCategory {
 	return s.diagnosticCategory
+}
+
+func SignalPayloadGet(signal *Signal, key string) (value any, error error) {
+	if value, exist := signal.payload[key]; exist {
+		return value, nil
+	}
+
+	return nil, fmt.Errorf("key '%s' not present in payload", key)
+}
+
+func SignalPayloadGetAs[TValue any](signal *Signal, key string) (TValue, error) {
+	var zero TValue
+
+	raw, err := SignalPayloadGet(signal, key)
+	if err != nil {
+		return zero, err
+	}
+
+	casted, ok := raw.(TValue)
+	if !ok {
+		return zero, fmt.Errorf("payload key '%s': expected type %T, got %T", key, zero, raw)
+	}
+
+	return casted, nil
 }
 
 // ----------------------------------------------------------- SIGNAL DISPATCHER
@@ -142,7 +168,7 @@ func SignalContextPopSpan(ctx *SignalContext) {
 	}
 }
 
-func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory) Signal {
+func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory, payload map[string]any) Signal {
 	if !signalDispatcherDiagnosticCategoryIsValid(ctx.dispatcher, diagnosticCategory) {
 		panic(fmt.Errorf("unknown diagnostic category '%s', did you forget to declare it in the manifest?", diagnosticCategory))
 	}
@@ -150,10 +176,13 @@ func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCa
 	traceCopy := make([]string, len(ctx.spanStack))
 	copy(traceCopy, ctx.spanStack)
 
+	payloadCopy := maps.Clone(payload)
+
 	return Signal{
 		id:                 signalID,
 		spanTrace:          traceCopy,
 		diagnosticCategory: diagnosticCategory,
+		payload:            payloadCopy,
 	}
 }
 

@@ -17,7 +17,11 @@ func SignalDispatcherCreate(manifest DiagnosticCategoryManifest) *SignalDispatch
 type SignalSink = internal.SignalSink
 
 func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, key string, sink SignalSink) {
-	internal.SignalDispatcherRegisterSink(dispatcher, key, sink)
+	internal.SignalDispatcherRegisterSink(dispatcher, key, sink, 0)
+}
+
+func SignalDispatcherRegisterFilteredSink(dispatcher *SignalDispatcher, key string, sink SignalSink, minWeight int) {
+	internal.SignalDispatcherRegisterSink(dispatcher, key, sink, minWeight)
 }
 
 type SignalContext = internal.SignalContext

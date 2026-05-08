@@ -18,10 +18,12 @@ type scenarioOutput struct{}
 
 var defaultManifest = signal.DiagnosticCategoryManifest{
 	{
-		Label: "",
+		Label:  "",
+		Weight: 0,
 	},
 	{
-		Label: "ERROR",
+		Label:  "ERROR",
+		Weight: 10,
 	},
 }
 
@@ -49,6 +51,7 @@ func init() {
 				runDiagnosticCategoryFlowScenario(execCtx),
 				runDiagnosticCategoryUnknownManifestPanicScenario(execCtx),
 				runDiagnosticDuplicateCategoryScenario(execCtx),
+				runDiagnosticSinkFilterScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core", "diagnostic_categories",
@@ -249,6 +252,75 @@ func runDiagnosticDuplicateCategoryScenario(execCtx shield.SHIELD_Testing_Execut
 					Label: "ERROR",
 				},
 			})
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func runDiagnosticSinkFilterScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		infoID  string
+		errorID string
+	}
+	type scenarioOutput struct{}
+
+	sink := make([]signal.Signal, 0)
+
+	sinkMethod := func(input signal.Signal) {
+		sink = append(sink, input)
+	}
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_signal_diagnostic_filtered_sink",
+		"Validates that the library can handle simple filtered sinks (min weight)",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"guard",
+				scenarioInput{errorID: "ERROR_007", infoID: "INFO_007"},
+				shield.SHIELD_Testing_GuardPolicyPredicate(func(_ scenarioOutput) (passed bool, reason string) {
+					amountInSink := len(sink)
+
+					if amountInSink == 0 {
+						return false, "expected at least 1 entry in sink"
+					}
+
+					for _, entry := range sink {
+						diagnosticCat := entry.DiagnosticCategory()
+						if diagnosticCat != "ERROR" {
+							return false, fmt.Sprintf("expected sink entry to be 'ERROR', got '%s'", diagnosticCat)
+						}
+					}
+
+					return true, ""
+				}),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			dispatcher := signal.SignalDispatcherCreate(signal.DiagnosticCategoryManifest{
+				{
+					Label:  "INFO",
+					Weight: 0,
+				},
+				{
+					Label:  "ERROR",
+					Weight: 10,
+				},
+			})
+			signal.SignalDispatcherRegisterFilteredSink(dispatcher, "memory", sinkMethod, 10)
+
+			ctx := signal.SignalContextCreate(dispatcher)
+			testInfoSignal := signal.SignalContextSignalCreate(ctx, input.infoID, "INFO")
+			testErrorSignal := signal.SignalContextSignalCreate(ctx, input.errorID, "ERROR")
+
+			signal.SignalContextEmit(ctx, testInfoSignal)
+			signal.SignalContextEmit(ctx, testErrorSignal)
 
 			return scenarioOutput{}, nil
 		},

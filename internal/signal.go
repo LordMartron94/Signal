@@ -40,22 +40,21 @@ func (s *Signal) DiagnosticCategory() DiagnosticCategory {
 // ----------------------------------------------------------- SIGNAL DISPATCHER
 
 type SignalDispatcher struct {
-	mutex                     sync.RWMutex
-	registeredSinks           map[string]struct{}
-	sinks                     []SignalSink
-	manifest                  DiagnosticCategoryManifest
-	validDiagnosticCategories map[DiagnosticCategory]struct{}
+	mutex                sync.RWMutex
+	registeredSinks      map[string]struct{}
+	sinks                []signalSinkConfiguration
+	diagnosticCategories map[DiagnosticCategory]DiagnosticCategorySetting
 }
 
 func SignalDispatcherCreate(manifest DiagnosticCategoryManifest) *SignalDispatcher {
-	validDiagnosticCategories := make(map[DiagnosticCategory]struct{})
+	diagnosticCategories := make(map[DiagnosticCategory]DiagnosticCategorySetting)
 	var duplicateError error
 
 	for _, setting := range manifest {
-		if _, seen := validDiagnosticCategories[setting.Label]; seen {
+		if _, seen := diagnosticCategories[setting.Label]; seen {
 			duplicateError = errors.Join(duplicateError, fmt.Errorf("duplicate diagnostic category '%s'", setting.Label))
 		}
-		validDiagnosticCategories[setting.Label] = struct{}{}
+		diagnosticCategories[setting.Label] = setting
 	}
 
 	if duplicateError != nil {
@@ -63,22 +62,29 @@ func SignalDispatcherCreate(manifest DiagnosticCategoryManifest) *SignalDispatch
 	}
 
 	return &SignalDispatcher{
-		registeredSinks:           make(map[string]struct{}),
-		sinks:                     make([]SignalSink, 0),
-		mutex:                     sync.RWMutex{},
-		manifest:                  manifest,
-		validDiagnosticCategories: validDiagnosticCategories,
+		registeredSinks:      make(map[string]struct{}),
+		sinks:                make([]signalSinkConfiguration, 0),
+		mutex:                sync.RWMutex{},
+		diagnosticCategories: diagnosticCategories,
 	}
 }
 
 type SignalSink = func(input Signal)
 
-func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, key string, sink SignalSink) {
+type signalSinkConfiguration struct {
+	sink      SignalSink
+	minWeight int
+}
+
+func SignalDispatcherRegisterSink(dispatcher *SignalDispatcher, key string, sink SignalSink, minWeight int) {
 	dispatcher.mutex.Lock()
 	defer dispatcher.mutex.Unlock()
 
 	if _, exist := dispatcher.registeredSinks[key]; !exist {
-		dispatcher.sinks = append(dispatcher.sinks, sink)
+		dispatcher.sinks = append(dispatcher.sinks, signalSinkConfiguration{
+			sink:      sink,
+			minWeight: minWeight,
+		})
 		dispatcher.registeredSinks[key] = struct{}{}
 	}
 }
@@ -87,13 +93,24 @@ func signalDispatcherEmit(dispatcher *SignalDispatcher, signal Signal) {
 	dispatcher.mutex.RLock()
 	defer dispatcher.mutex.RUnlock()
 
+	// TODO - think about a better way to handle this
+	// without having signal carry weight data as that is absurd
+
+	diagnosticCategory := signal.DiagnosticCategory()
+	setting := dispatcher.diagnosticCategories[diagnosticCategory]
+	weight := setting.Weight
+
 	for _, sink := range dispatcher.sinks {
-		sink(signal)
+		if sink.minWeight > weight {
+			continue
+		}
+
+		sink.sink(signal)
 	}
 }
 
 func signalDispatcherDiagnosticCategoryIsValid(dispatcher *SignalDispatcher, category DiagnosticCategory) bool {
-	if _, valid := dispatcher.validDiagnosticCategories[category]; valid {
+	if _, valid := dispatcher.diagnosticCategories[category]; valid {
 		return true
 	}
 

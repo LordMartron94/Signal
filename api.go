@@ -192,6 +192,9 @@ SignalBuilder provides a fluent interface for constructing and emitting signals.
 [Context]
 This builder mitigates the ergonomic friction of the underlying factory function.
 It lazily allocates the payload map to prevent unnecessary heap pressure when no payload is attached.
+
+[Invariants]
+A builder is single-use. After `Build` or `Emit`, the kill-switch clears `ctx`, `payload`, and `location`; the same instance must not be reused.
 */
 type SignalBuilder struct {
 	ctx      *SignalContext
@@ -206,6 +209,9 @@ SignalContextBuild initiates a fluent builder chain for signal creation.
 
 [Returns]
 Returns a pointer to a new SignalBuilder state container.
+
+[Context]
+Finalize the builder exactly once with `Build` (signal only) or `Emit` (build and dispatch).
 */
 func SignalContextBuild(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory) *SignalBuilder {
 	return &SignalBuilder{
@@ -219,6 +225,9 @@ func SignalContextBuild(ctx *SignalContext, signalID string, diagnosticCategory 
 
 /*
 Payload attaches a key-value pair to the signal's diagnostic data.
+
+[Context]
+Only valid before the builder is finalized via `Build` or `Emit`.
 
 [Side Effects]
 Mutates the builder's internal payload map, allocating it on the first call.
@@ -235,8 +244,12 @@ func (b *SignalBuilder) Payload(key string, value any) *SignalBuilder {
 /*
 Location attaches a source location to the signal.
 
+[Context]
+Only valid before the builder is finalized via `Build` or `Emit`.
+
 [Side Effects]
-Mutates the builder's internal location pointer. Returns the builder instance for chaining.
+Mutates the builder's internal location pointer.
+Returns the builder instance for chaining.
 */
 func (b *SignalBuilder) Location(loc *location.Location) *SignalBuilder {
 	b.location = loc
@@ -251,18 +264,40 @@ Returns the final Signal value object.
 
 [Panics]
 Panics if the diagnostic category is not declared in the dispatcher's manifest.
+Panics on a second call because the kill-switch leaves `ctx` nil.
+
+[Side Effects]
+Invokes `SignalContextSignalCreate`, then clears `ctx`, `payload`, and `location` on the builder (kill-switch).
+The builder must be discarded afterward; chaining `Payload`, `Location`, `Build`, or `Emit` on the same instance is invalid.
 */
 func (b *SignalBuilder) Build() Signal {
-	return SignalContextSignalCreate(b.ctx, b.id, b.category, b.payload, b.location)
+	sig := SignalContextSignalCreate(b.ctx, b.id, b.category, b.payload, b.location)
+
+	b.ctx = nil
+	b.payload = nil
+	b.location = nil
+
+	return sig
 }
 
 /*
 Emit builds the signal and immediately dispatches it to all matching sinks.
 
+[Context]
+Equivalent to `Build` followed by `SignalContextEmit` on the captured context.
+The kill-switch runs inside `Build`; this method does not return a signal.
+
+[Panics]
+Panics under the same conditions as `Build`, including on reuse after the kill-switch has fired.
+
 [Side Effects]
 Invokes sink callbacks synchronously as part of emission.
+Clears `ctx`, `payload`, and `location` on the builder via `Build`; the builder must be discarded afterward.
 */
 func (b *SignalBuilder) Emit() {
-	signal := b.Build()
-	SignalContextEmit(b.ctx, signal)
+	ctx := b.ctx
+
+	sig := b.Build()
+
+	SignalContextEmit(ctx, sig)
 }

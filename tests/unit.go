@@ -45,6 +45,7 @@ func init() {
 				runContextForkConcurrencyScenario(execCtx),
 				runSignalLocationScenario(execCtx),
 				runBuilderScenario(execCtx),
+				runBuilderKillSwitchScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core",
@@ -778,6 +779,47 @@ func runBuilderScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.S
 				Payload("retry_count", 3).
 				Location(&loc).
 				Emit()
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func runBuilderKillSwitchScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		signalID string
+	}
+	type scenarioOutput struct{}
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_signal_builder_killswitch",
+		"Validates that the SignalBuilder panics if reused after emission to prevent state contamination",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"guard_must_panic_on_reuse",
+				scenarioInput{signalID: "ERROR_BUILDER_REUSE"},
+				shield.SHIELD_Testing_GuardPolicyMustPanic[scenarioOutput](),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			dispatcher := signal.SignalDispatcherCreate(defaultManifest)
+			ctx := signal.SignalContextCreate(dispatcher)
+
+			// 1. Initialize the builder
+			builder := signal.SignalContextBuild(ctx, input.signalID, "ERROR").
+				Payload("key", "value")
+
+			// 2. The first emit must succeed and drain the state
+			builder.Emit()
+
+			// 3. The second emit MUST panic (kill-switch triggered)
+			builder.Emit()
 
 			return scenarioOutput{}, nil
 		},

@@ -1,6 +1,9 @@
 package signal
 
-import "signal/internal"
+import (
+	"foundation/location"
+	"signal/internal"
+)
 
 /*
 DiagnosticCategory identifies a logical diagnostics class (for example TRACE, INFO, WARNING, ERROR).
@@ -22,7 +25,7 @@ type DiagnosticCategoryManifest = internal.DiagnosticCategoryManifest
 Signal is the immutable diagnostics event payload propagated through the dispatcher pipeline.
 
 [Context]
-Signals are created from a `SignalContext` to capture span trace, timestamp, category, and payload in one value object.
+Signals are created from a `SignalContext` to capture span trace, timestamp, category, optional source location, and payload in one value object.
 */
 type Signal = internal.Signal
 
@@ -160,14 +163,17 @@ func SignalContextPopSpan(ctx *SignalContext) {
 /*
 SignalContextSignalCreate creates a signal snapshot from the current context state.
 
+[Parameters]
+`location` is optional. Pass nil when the signal has no source location (for example global or process-level diagnostics).
+
 [Returns]
-Returns a new signal containing copied span trace and copied payload map.
+Returns a new signal containing copied span trace, copied payload map, and the provided location pointer (which may be nil).
 
 [Panics]
 Panics when `diagnosticCategory` is not declared in the dispatcher's manifest.
 */
-func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory, payload map[string]any) Signal {
-	return internal.SignalContextSignalCreate(ctx, signalID, diagnosticCategory, payload)
+func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory, payload map[string]any, location *location.Location) Signal {
+	return internal.SignalContextSignalCreate(ctx, signalID, diagnosticCategory, payload, location)
 }
 
 /*

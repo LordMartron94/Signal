@@ -2,6 +2,7 @@ package tests
 
 import (
 	"fmt"
+	"foundation/location"
 	"shield"
 	"signal"
 	"slices"
@@ -42,6 +43,7 @@ func init() {
 				runPayloadAccessorScenario(execCtx),
 				runTimestampScenario(execCtx),
 				runContextForkConcurrencyScenario(execCtx),
+				runSignalLocationScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core",
@@ -147,7 +149,7 @@ func runContextForkConcurrencyScenario(execCtx shield.SHIELD_Testing_ExecutionCo
 					workerSpan := fmt.Sprintf("Worker_%d", workerID)
 					signal.SignalContextPushSpan(childCtx, workerSpan)
 
-					testSignal := signal.SignalContextSignalCreate(childCtx, input.signalID, "ERROR", nil)
+					testSignal := signal.SignalContextSignalCreate(childCtx, input.signalID, "ERROR", nil, nil)
 					signal.SignalContextEmit(childCtx, testSignal)
 				}(i)
 			}
@@ -160,7 +162,7 @@ func runContextForkConcurrencyScenario(execCtx shield.SHIELD_Testing_ExecutionCo
 			default:
 			}
 
-			rootSignal := signal.SignalContextSignalCreate(rootCtx, "ROOT_FINAL", "ERROR", nil)
+			rootSignal := signal.SignalContextSignalCreate(rootCtx, "ROOT_FINAL", "ERROR", nil, nil)
 			rootTrace := rootSignal.SpanTrace()
 			if len(rootTrace) != 1 || rootTrace[0] != "Root Span" {
 				panic(fmt.Sprintf("Root context contaminated: %v", rootTrace))
@@ -275,7 +277,7 @@ func runConcurrencyScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shie
 					signal.SignalDispatcherRegisterSink(dispatcher, workerKey, safeSinkMethod)
 
 					ctx := signal.SignalContextCreate(dispatcher)
-					testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
+					testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil, nil)
 					signal.SignalContextEmit(ctx, testSignal)
 				}(i)
 			}
@@ -329,7 +331,7 @@ func runDiagnosticCategoryUnknownManifestPanicScenario(execCtx shield.SHIELD_Tes
 		func(input scenarioInput) (scenarioOutput, error) {
 			dispatcher := signal.SignalDispatcherCreate(signal.DiagnosticCategoryManifest{})
 			ctx := signal.SignalContextCreate(dispatcher)
-			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", nil)
+			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", nil, nil)
 			signal.SignalContextEmit(ctx, testSignal)
 
 			return scenarioOutput{}, nil
@@ -432,8 +434,8 @@ func runDiagnosticSinkFilterScenario(execCtx shield.SHIELD_Testing_ExecutionCont
 			signal.SignalDispatcherRegisterFilteredSink(dispatcher, "memory", sinkMethod, 10)
 
 			ctx := signal.SignalContextCreate(dispatcher)
-			testInfoSignal := signal.SignalContextSignalCreate(ctx, input.infoID, "INFO", nil)
-			testErrorSignal := signal.SignalContextSignalCreate(ctx, input.errorID, "ERROR", nil)
+			testInfoSignal := signal.SignalContextSignalCreate(ctx, input.infoID, "INFO", nil, nil)
+			testErrorSignal := signal.SignalContextSignalCreate(ctx, input.errorID, "ERROR", nil, nil)
 
 			signal.SignalContextEmit(ctx, testInfoSignal)
 			signal.SignalContextEmit(ctx, testErrorSignal)
@@ -520,7 +522,7 @@ func runPayloadAccessorScenario(execCtx shield.SHIELD_Testing_ExecutionContext) 
 
 			ctx := signal.SignalContextCreate(dispatcher)
 
-			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", input.payload)
+			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", input.payload, nil)
 			signal.SignalContextEmit(ctx, testSignal)
 
 			return scenarioOutput{}, nil
@@ -584,8 +586,97 @@ func runTimestampScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield
 
 			ctx := signal.SignalContextCreate(dispatcher)
 
-			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", nil)
+			testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", nil, nil)
 			signal.SignalContextEmit(ctx, testSignal)
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func runSignalLocationScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		signalID string
+	}
+	type scenarioOutput struct{}
+
+	var observerSink []signal.Signal
+	var observerMutex sync.Mutex
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_signal_location",
+		"Validates that a signal correctly captures and exposes an optional source location",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"guard_location_integrity",
+				scenarioInput{signalID: "ERROR_LOCATION"},
+				shield.SHIELD_Testing_GuardPolicyPredicate(func(_ scenarioOutput) (passed bool, reason string) {
+					if len(observerSink) != 2 {
+						return false, fmt.Sprintf("expected 2 signals, got %d", len(observerSink))
+					}
+
+					// 1. Verify Signal WITH Location
+					sigWithLoc := observerSink[0]
+					if !sigWithLoc.HasLocation() {
+						return false, "expected first signal to report HasLocation() == true"
+					}
+
+					loc := sigWithLoc.Location()
+					if loc == nil {
+						return false, "expected Location() to return non-nil"
+					}
+
+					// Verify the hierarchical data survived
+					if loc.Scheme() != "file" || loc.Path() != "/src/main.go" {
+						return false, fmt.Sprintf("location mismatch: %s://%s", loc.Scheme(), loc.Path())
+					}
+
+					// Verify the spatial coordinates survived
+					line, err := location.LocationCoordinateGetAs[int](*loc, "line")
+					if err != nil || line != 42 {
+						return false, "location coordinate 'line' corrupted or missing"
+					}
+
+					// 2. Verify Signal WITHOUT Location
+					sigWithoutLoc := observerSink[1]
+					if sigWithoutLoc.HasLocation() {
+						return false, "expected second signal to report HasLocation() == false"
+					}
+					if sigWithoutLoc.Location() != nil {
+						return false, "expected Location() to return nil for second signal"
+					}
+
+					return true, ""
+				}),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			dispatcher := signal.SignalDispatcherCreate(defaultManifest)
+
+			signal.SignalDispatcherRegisterSink(dispatcher, "observer", func(sig signal.Signal) {
+				observerMutex.Lock()
+				defer observerMutex.Unlock()
+				observerSink = append(observerSink, sig)
+			})
+
+			ctx := signal.SignalContextCreate(dispatcher)
+
+			// 1. Emit WITH location
+			loc := location.LocationCreate("file", "", "/src/main.go", "", "", map[string]any{"line": 42})
+
+			// Assuming signature: SignalContextSignalCreate(ctx, id, category, payload, locationPointer)
+			testSignal1 := signal.SignalContextSignalCreate(ctx, input.signalID+"_1", "ERROR", nil, &loc)
+			signal.SignalContextEmit(ctx, testSignal1)
+
+			// 2. Emit WITHOUT location
+			testSignal2 := signal.SignalContextSignalCreate(ctx, input.signalID+"_2", "ERROR", nil, nil)
+			signal.SignalContextEmit(ctx, testSignal2)
 
 			return scenarioOutput{}, nil
 		},
@@ -614,7 +705,7 @@ func executeFlowAction(dispatcher *signal.SignalDispatcher, sinkMethod func(sign
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 
 	ctx := signal.SignalContextCreate(dispatcher)
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil, nil)
 	signal.SignalContextEmit(ctx, testSignal)
 }
 
@@ -630,7 +721,7 @@ func executeIdempotencyAction(dispatcher *signal.SignalDispatcher, sinkMethod fu
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 
 	ctx := signal.SignalContextCreate(dispatcher)
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil, nil)
 	signal.SignalContextEmit(ctx, testSignal)
 }
 
@@ -654,7 +745,7 @@ func executeContextAction(dispatcher *signal.SignalDispatcher, sinkMethod func(s
 
 	signal.SignalContextPushSpan(ctx, "Parsing Module")
 
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil, nil)
 	signal.SignalContextEmit(ctx, testSignal)
 
 	signal.SignalContextPopSpan(ctx)
@@ -688,7 +779,7 @@ func executeContextIsolationAction(dispatcher *signal.SignalDispatcher, sinkMeth
 
 	signal.SignalContextPopSpan(ctx)
 
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "", nil, nil)
 	signal.SignalContextEmit(ctx, testSignal)
 }
 
@@ -710,7 +801,7 @@ func executeDiagFlowAction(dispatcher *signal.SignalDispatcher, sinkMethod func(
 	signal.SignalDispatcherRegisterSink(dispatcher, "memory", sinkMethod)
 
 	ctx := signal.SignalContextCreate(dispatcher)
-	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", nil)
+	testSignal := signal.SignalContextSignalCreate(ctx, input.signalID, "ERROR", nil, nil)
 	signal.SignalContextEmit(ctx, testSignal)
 }
 

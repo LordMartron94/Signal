@@ -3,6 +3,7 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"foundation/location"
 	"maps"
 	"slices"
 	"sync"
@@ -26,6 +27,7 @@ type Signal struct {
 	id                 string
 	spanTrace          []string
 	diagnosticCategory DiagnosticCategory
+	location           *location.Location
 	payload            map[string]any
 	timestamp          time.Time
 }
@@ -64,6 +66,29 @@ Pure method. No side effects.
 */
 func (s *Signal) DiagnosticCategory() DiagnosticCategory {
 	return s.diagnosticCategory
+}
+
+/*
+Location returns the optional source location attached to the signal.
+
+[Returns]
+Returns the location pointer when one was provided at creation time, or nil when no location was set.
+
+[Side Effects]
+Pure method. No side effects.
+*/
+func (s *Signal) Location() *location.Location {
+	return s.location
+}
+
+/*
+HasLocation reports whether the signal carries a non-nil location.
+
+[Side Effects]
+Pure method. No side effects.
+*/
+func (s *Signal) HasLocation() bool {
+	return s.location != nil
 }
 
 /*
@@ -156,9 +181,6 @@ func signalDispatcherEmit(dispatcher *SignalDispatcher, signal Signal) {
 	dispatcher.mutex.RLock()
 	defer dispatcher.mutex.RUnlock()
 
-	// TODO - think about a better way to handle this
-	// without having signal carry weight data as that is absurd
-
 	diagnosticCategory := signal.DiagnosticCategory()
 	setting := dispatcher.diagnosticCategories[diagnosticCategory]
 	weight := setting.Weight
@@ -214,7 +236,7 @@ func SignalContextPopSpan(ctx *SignalContext) {
 	}
 }
 
-func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory, payload map[string]any) Signal {
+func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory, payload map[string]any, location *location.Location) Signal {
 	if !signalDispatcherDiagnosticCategoryIsValid(ctx.dispatcher, diagnosticCategory) {
 		panic(fmt.Errorf("unknown diagnostic category '%s', did you forget to declare it in the manifest?", diagnosticCategory))
 	}
@@ -228,6 +250,7 @@ func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCa
 		diagnosticCategory: diagnosticCategory,
 		payload:            payloadCopy,
 		timestamp:          time.Now(),
+		location:           location,
 	}
 }
 

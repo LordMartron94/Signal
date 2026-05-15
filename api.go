@@ -185,3 +185,84 @@ Invokes sink callbacks synchronously as part of emission.
 func SignalContextEmit(ctx *SignalContext, signal Signal) {
 	internal.SignalContextEmit(ctx, signal)
 }
+
+/*
+SignalBuilder provides a fluent interface for constructing and emitting signals.
+
+[Context]
+This builder mitigates the ergonomic friction of the underlying factory function.
+It lazily allocates the payload map to prevent unnecessary heap pressure when no payload is attached.
+*/
+type SignalBuilder struct {
+	ctx      *SignalContext
+	id       string
+	category DiagnosticCategory
+	payload  map[string]any
+	location *location.Location
+}
+
+/*
+SignalContextBuild initiates a fluent builder chain for signal creation.
+
+[Returns]
+Returns a pointer to a new SignalBuilder state container.
+*/
+func SignalContextBuild(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory) *SignalBuilder {
+	return &SignalBuilder{
+		ctx:      ctx,
+		id:       signalID,
+		category: diagnosticCategory,
+		payload:  nil, // Lazy initialization
+		location: nil,
+	}
+}
+
+/*
+Payload attaches a key-value pair to the signal's diagnostic data.
+
+[Side Effects]
+Mutates the builder's internal payload map, allocating it on the first call.
+Returns the builder instance for chaining.
+*/
+func (b *SignalBuilder) Payload(key string, value any) *SignalBuilder {
+	if b.payload == nil {
+		b.payload = make(map[string]any)
+	}
+	b.payload[key] = value
+	return b
+}
+
+/*
+Location attaches a source location to the signal.
+
+[Side Effects]
+Mutates the builder's internal location pointer. Returns the builder instance for chaining.
+*/
+func (b *SignalBuilder) Location(loc *location.Location) *SignalBuilder {
+	b.location = loc
+	return b
+}
+
+/*
+Build delegates to the core factory method to construct the immutable signal snapshot.
+
+[Returns]
+Returns the final Signal value object.
+
+[Panics]
+Panics if the diagnostic category is not declared in the dispatcher's manifest.
+*/
+func (b *SignalBuilder) Build() Signal {
+	return SignalContextSignalCreate(b.ctx, b.id, b.category, b.payload, b.location)
+}
+
+/*
+Emit builds the signal and immediately dispatches it to all matching sinks.
+
+[Side Effects]
+Invokes sink callbacks synchronously as part of emission.
+*/
+func (b *SignalBuilder) Emit() {
+	signal := b.Build()
+	SignalContextEmit(b.ctx, signal)
+}

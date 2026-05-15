@@ -44,6 +44,7 @@ func init() {
 				runTimestampScenario(execCtx),
 				runContextForkConcurrencyScenario(execCtx),
 				runSignalLocationScenario(execCtx),
+				runBuilderScenario(execCtx),
 			}
 		},
 		"SIGNAL", "core",
@@ -677,6 +678,106 @@ func runSignalLocationScenario(execCtx shield.SHIELD_Testing_ExecutionContext) s
 			// 2. Emit WITHOUT location
 			testSignal2 := signal.SignalContextSignalCreate(ctx, input.signalID+"_2", "ERROR", nil, nil)
 			signal.SignalContextEmit(ctx, testSignal2)
+
+			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func runBuilderScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct {
+		baseID string
+		richID string
+	}
+	type scenarioOutput struct{}
+
+	var observerSink []signal.Signal
+	var observerMutex sync.Mutex
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_signal_builder",
+		"Validates the fluent SignalBuilder correctly accumulates state, handles lazy allocation, and emits",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"guard_builder_integrity",
+				scenarioInput{
+					baseID: "ERROR_BUILDER_BASE",
+					richID: "ERROR_BUILDER_RICH",
+				},
+				shield.SHIELD_Testing_GuardPolicyPredicate(func(_ scenarioOutput) (passed bool, reason string) {
+					if len(observerSink) != 2 {
+						return false, fmt.Sprintf("expected 2 signals, got %d", len(observerSink))
+					}
+
+					// 1. Validate Base Case (No Payload, No Location)
+					baseSig := observerSink[0]
+					if baseSig.ID() != "ERROR_BUILDER_BASE" {
+						return false, fmt.Sprintf("expected base ID, got '%s'", baseSig.ID())
+					}
+					if baseSig.HasLocation() {
+						return false, "expected base signal to have no location"
+					}
+					_, err := signal.SignalPayloadGet(&baseSig, "any_key")
+					if err == nil {
+						return false, "expected error when querying empty lazy payload, got nil"
+					}
+
+					// 2. Validate Rich Case (Accumulated Payload, Attached Location)
+					richSig := observerSink[1]
+					if richSig.ID() != "ERROR_BUILDER_RICH" {
+						return false, fmt.Sprintf("expected rich ID, got '%s'", richSig.ID())
+					}
+
+					// Validate Location
+					if !richSig.HasLocation() {
+						return false, "expected rich signal to have a location"
+					}
+					if richSig.Location().Path() != "/src/builder.go" {
+						return false, "builder failed to attach correct location path"
+					}
+
+					// Validate Accumulated Payload
+					strVal, err := signal.SignalPayloadGetAs[string](&richSig, "module")
+					if err != nil || strVal != "auth" {
+						return false, "builder failed to accumulate string payload"
+					}
+
+					intVal, err := signal.SignalPayloadGetAs[int](&richSig, "retry_count")
+					if err != nil || intVal != 3 {
+						return false, "builder failed to accumulate integer payload"
+					}
+
+					return true, ""
+				}),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			dispatcher := signal.SignalDispatcherCreate(defaultManifest)
+
+			signal.SignalDispatcherRegisterSink(dispatcher, "observer", func(sig signal.Signal) {
+				observerMutex.Lock()
+				defer observerMutex.Unlock()
+				observerSink = append(observerSink, sig)
+			})
+
+			ctx := signal.SignalContextCreate(dispatcher)
+
+			// 1. The Minimal Chain (Tests lazy allocation safety)
+			signal.SignalContextBuild(ctx, input.baseID, "ERROR").Emit()
+
+			// 2. The Maximal Chain (Tests state accumulation)
+			loc := location.LocationCreate("file", "", "/src/builder.go", "", "", nil)
+			signal.SignalContextBuild(ctx, input.richID, "ERROR").
+				Payload("module", "auth").
+				Payload("retry_count", 3).
+				Location(&loc).
+				Emit()
 
 			return scenarioOutput{}, nil
 		},

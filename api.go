@@ -62,6 +62,17 @@ func SignalPayloadGetAs[TValue any](signal *Signal, key string) (value TValue, e
 }
 
 /*
+SignalPayloadEach iterates over all key-value pairs in the signal's payload.
+
+[Context]
+Provides read-only traversal for generic sinks (like JSON formatters or CLI renderers)
+without exposing the underlying map reference or allocating key slices.
+*/
+func SignalPayloadEach(sig *Signal, iterator func(key string, value any)) {
+	internal.SignalPayloadEach(sig, iterator)
+}
+
+/*
 SignalDispatcher is the category-aware fan-out router for signals.
 
 [Context]

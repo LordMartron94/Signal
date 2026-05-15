@@ -5,7 +5,9 @@ import (
 	"foundation/location"
 	"shield"
 	"signal"
+	"signal/rendering"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -65,8 +67,20 @@ func init() {
 		"SIGNAL", "core", "diagnostic_categories",
 	)
 
+	rendererOperation := shield.SHIELD_Testing_OperationCreateStateless(
+		"operation_signal_rendering",
+		"Validates the buffered rendering subsystem",
+		func(_ struct{}, execCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
+			return []shield.SHIELD_Testing_ScenarioRunResult{
+				runBufferedRendererScenario(execCtx),
+			}
+		},
+		"SIGNAL", "render",
+	)
+
 	shield.SHIELD_Registry_OperationRegister(flowOperation)
 	shield.SHIELD_Registry_OperationRegister(diagnosticCategoryOperation)
+	shield.SHIELD_Registry_OperationRegister(rendererOperation)
 }
 
 func runContextForkConcurrencyScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
@@ -822,6 +836,86 @@ func runBuilderKillSwitchScenario(execCtx shield.SHIELD_Testing_ExecutionContext
 			builder.Emit()
 
 			return scenarioOutput{}, nil
+		},
+	)
+
+	return shield.SHIELD_Testing_OperationRunScenario(
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+	)
+}
+
+func runBufferedRendererScenario(execCtx shield.SHIELD_Testing_ExecutionContext) shield.SHIELD_Testing_ScenarioRunResult {
+	type scenarioInput struct{}
+	type scenarioOutput struct {
+		renderedOutput string
+	}
+
+	scenario := shield.SHIELD_Testing_ScenarioCreate(
+		"scenario_signal_buffered_renderer",
+		"Validates that the buffered renderer captures signals and formats them sequentially upon request",
+		[]shield.SHIELD_Testing_Guard[scenarioInput, scenarioOutput]{
+			shield.SHIELD_Testing_GuardCreate(
+				"guard_render_integrity",
+				scenarioInput{},
+				shield.SHIELD_Testing_GuardPolicyPredicate(func(output scenarioOutput) (passed bool, reason string) {
+					rendered := output.renderedOutput
+
+					// 1. Validate that the renderer hasn't swallowed signals
+					if !strings.Contains(rendered, "ERROR_PARSER_01") {
+						return false, "missing first signal ID in output"
+					}
+					if !strings.Contains(rendered, "WARNING_LEXER_02") {
+						return false, "missing second signal ID in output"
+					}
+
+					// 2. Validate that context spans were rendered
+					if !strings.Contains(rendered, "AST Parsing Phase") {
+						return false, "missing span trace data in output"
+					}
+
+					// 3. Validate that payload formatting was executed
+					if !strings.Contains(rendered, "unexpected_token") {
+						return false, "missing payload data in output"
+					}
+
+					return true, ""
+				}),
+			),
+		},
+		func(input scenarioInput) (scenarioOutput, error) {
+			// Setup Dispatcher with a mock manifest supporting ERROR and WARNING
+			manifest := signal.DiagnosticCategoryManifest{
+				{Label: "WARNING", Weight: 10},
+				{Label: "ERROR", Weight: 20},
+			}
+			dispatcher := signal.SignalDispatcherCreate(manifest)
+
+			// 1. Initialize the Renderer (This will cause compiler errors until implemented)
+			// Assuming you will create a signal.RenderColorNone constant
+			renderer := rendering.SignalRendererCreate(rendering.RenderColorNone)
+
+			// 2. Register the renderer's Capture method as the sink
+			signal.SignalDispatcherRegisterSink(dispatcher, "buffered_cli_renderer", rendering.SignalRendererSinkGet(renderer))
+
+			// 3. Setup Context and emit signals
+			ctx := signal.SignalContextCreate(dispatcher)
+			signal.SignalContextPushSpan(ctx, "AST Parsing Phase")
+
+			// Emit Error
+			signal.SignalContextBuild(ctx, "ERROR_PARSER_01", "ERROR").
+				Payload("reason", "unexpected_token").
+				Emit()
+
+			// Emit Warning
+			signal.SignalContextBuild(ctx, "WARNING_LEXER_02", "WARNING").
+				Emit()
+
+			// 4. Render the buffer
+			finalOutput := rendering.SignalRendererRender(renderer)
+
+			return scenarioOutput{renderedOutput: finalOutput}, nil
 		},
 	)
 

@@ -125,6 +125,15 @@ func SignalPayloadGetAs[TValue any](signal *Signal, key string) (TValue, error) 
 	return casted, nil
 }
 
+func SignalPayloadEach(signal *Signal, iterator func(key string, value any)) {
+	if signal.payload == nil {
+		return
+	}
+	for k, v := range signal.payload {
+		iterator(k, v)
+	}
+}
+
 // ----------------------------------------------------------- SIGNAL DISPATCHER
 
 type SignalDispatcher struct {

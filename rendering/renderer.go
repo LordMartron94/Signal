@@ -52,10 +52,28 @@ Pure function. No side effects.
 type LocationFormatter func(loc *location.Location) string
 
 /*
+SignalDetailExtension is an optional per-signal hook that appends custom detail after the header line and before trace and payload.
+
+[Context]
+Invoked from `renderSignal` when non-nil, immediately after `[CATEGORY] id` (and any location suffix) and before span trace and default payload rendering. Use it to emit domain-specific lines (hints, excerpts, links) through the shared SPLASH renderer.
+
+[Parameters]
+`renderer` is the same SPLASH instance used for the rest of the batch; buffer operations affect the final `SignalRendererRender` output. `sig` is the signal currently being formatted. `baseIntent` is the palette key already resolved for this signal's diagnostic category (same intent used for the category label).
+
+[Side Effects]
+Mutates `renderer`'s internal buffer when the hook writes content. The hook must not retain `renderer` or `sig` beyond the call unless the caller documents otherwise.
+*/
+type SignalDetailExtension func(
+	renderer *splash.SPLASH_Rendering_TerminalRenderer,
+	sig signal.Signal,
+	baseIntent int,
+)
+
+/*
 SignalRenderer buffers signals from a sink and formats them through SPLASH on demand.
 
 [Context]
-Create with `SignalRendererCreate`, register the sink from `SignalRendererSinkGet` on a `signal.SignalDispatcher`, emit signals, then call `SignalRendererRender` to produce CLI-style output. Indent width on the injected SPLASH renderer is set to two spaces at creation. Optional location suffixes on each signal line come from the `LocationFormatter` supplied at creation.
+Create with `SignalRendererCreate`, register the sink from `SignalRendererSinkGet` on a `signal.SignalDispatcher`, emit signals, then call `SignalRendererRender` to produce CLI-style output. Indent width on the injected SPLASH renderer is set to two spaces at creation. Optional location suffixes on each signal line come from the `LocationFormatter` supplied at creation. Optional `SignalDetailExtension` output is inserted after each signal header and before trace/payload.
 
 [Thread Safety]
 Safe for concurrent appends via the sink and a concurrent `SignalRendererRender` on the same instance; both paths lock the internal buffer.
@@ -66,6 +84,7 @@ type SignalRenderer struct {
 	buffer         []signal.Signal
 	grouping       GroupingConfiguration
 	formatLocation LocationFormatter
+	detailHook     SignalDetailExtension
 	metaIntent     int
 }
 
@@ -75,6 +94,7 @@ SignalRendererCreate constructs a renderer bound to a SPLASH terminal renderer a
 [Parameters]
 `renderer` must already be created with a palette sized for every intent returned by `grouping.ResolveIntent` and for `metaIntent` (used for trace and payload labels). `metaIntent` is the palette key for structural/meta lines such as `Trace:` and `Payload:`.
 `formatLocation` formats optional source locations on the signal header line (`[CATEGORY] id` + formatter suffix). Pass `nil` to never print location text even when signals carry a location.
+`detailHook` adds per-signal lines between the header and the built-in trace/payload sections. Pass `nil` to use only the default layout.
 
 [Side Effects]
 Sets `renderer` indent width to 2. Allocates an empty signal buffer.
@@ -83,6 +103,7 @@ func SignalRendererCreate(
 	renderer *splash.SPLASH_Rendering_TerminalRenderer,
 	grouping GroupingConfiguration,
 	formatLocation LocationFormatter,
+	detailHook SignalDetailExtension,
 	metaIntent int,
 ) *SignalRenderer {
 	splash.SPLASH_Rendering_TerminalRendererSetIndentWidth(renderer, 2)
@@ -92,6 +113,7 @@ func SignalRendererCreate(
 		buffer:         make([]signal.Signal, 0),
 		grouping:       grouping,
 		formatLocation: formatLocation,
+		detailHook:     detailHook,
 		metaIntent:     metaIntent,
 	}
 }
@@ -120,7 +142,7 @@ SignalRendererRender formats all buffered signals, clears the buffer, and return
 Returns an empty string when nothing was buffered. Otherwise returns grouped sections (priority keys first, then remaining buckets), a `=== SUMMARY ===` footer with count pills, and trailing newline spacing as produced by SPLASH.
 
 [Context]
-Per signal, output includes category-colored `[CATEGORY] id`, an optional location suffix from `formatLocation` when the signal has a location and the formatter returns non-empty text, optional indented span trace, and indented payload key/value lines via `signal.SignalPayloadEach`. Group headers use `ResolveIntent` on the bucket key; category lines use `ResolveIntent` on the diagnostic category string.
+Per signal, output includes category-colored `[CATEGORY] id`, an optional location suffix from `formatLocation` when the signal has a location and the formatter returns non-empty text, optional extra lines from `detailHook`, optional indented span trace, and indented payload key/value lines via `signal.SignalPayloadEach`. Group headers use `ResolveIntent` on the bucket key; category lines use `ResolveIntent` on the diagnostic category string.
 
 [Side Effects]
 Clears the internal signal buffer after formatting. Invokes SPLASH buffer operations and `SPLASH_Rendering_TerminalRendererRender`, which resets the SPLASH string buffer while preserving SPLASH indent state.
@@ -230,6 +252,10 @@ func renderSignal(s *SignalRenderer, sig signal.Signal) {
 	}
 
 	splash.SPLASH_Rendering_TerminalRendererBufferLineBreak(renderer)
+
+	if s.detailHook != nil {
+		s.detailHook(renderer, sig, intent)
+	}
 
 	spans := sig.SpanTrace()
 	if len(spans) > 0 {

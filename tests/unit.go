@@ -900,7 +900,7 @@ func runBufferedRendererScenario(execCtx shield.SHIELD_Testing_ExecutionContext)
 			splashRenderer := splash.SPLASH_Rendering_TerminalRendererCreate(splash.SPLASH_Rendering_TerminalColorModeNone, palette)
 
 			// 3. Inject into the adapter
-			renderer := rendering.SignalRendererCreate(splashRenderer, categoryGroupingStrategy, clientLocationFormatter, IntentMeta)
+			renderer := rendering.SignalRendererCreate(splashRenderer, categoryGroupingStrategy, clientLocationFormatter, nil, IntentMeta)
 
 			signal.SignalDispatcherRegisterSink(dispatcher, "buffered_cli_renderer", rendering.SignalRendererSinkGet(renderer))
 

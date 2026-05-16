@@ -100,7 +100,7 @@ signal.SignalContextBuild(ctx, "ERR_UNDEFINED", "ERROR").
 `signal/rendering` is optional. It adapts **SPLASH** for batched CLI-style output:
 
 1. In your application, create a SPLASH palette and `splash.SPLASH_Rendering_TerminalRenderer` (see the SPLASH module documentation).
-2. `rendering.SignalRendererCreate(renderer, grouping, formatLocation, metaIntent)` — sets indent width to 2 on the SPLASH renderer. `formatLocation` is a `LocationFormatter` (`func(*location.Location) string`) appended on the same line as `[CATEGORY] id`; pass `nil` to skip location text.
+2. `rendering.SignalRendererCreate(renderer, grouping, formatLocation, detailHook, metaIntent)` — sets indent width to 2 on the SPLASH renderer. `formatLocation` is a `LocationFormatter` appended on the same line as `[CATEGORY] id` (`nil` to skip). `detailHook` is an optional `SignalDetailExtension` for extra lines after the header and before trace/payload (`nil` for defaults only).
 3. Register `rendering.SignalRendererSinkGet(renderer)` on the Signal dispatcher.
 4. Emit signals as usual.
 5. `rendering.SignalRendererRender(renderer)` returns the formatted string and clears the capture buffer.
@@ -111,6 +111,7 @@ signal.SignalContextBuild(ctx, "ERR_UNDEFINED", "ERROR").
 - `PriorityOrder` — which buckets appear first in the body and summary.
 - `ResolveIntent` — SPLASH palette slot for group headers, summary pills, and per-line category color.
 - **Location formatting** — optional `LocationFormatter` passed to `SignalRendererCreate`. Invoked when a signal has a location; return `""` to print nothing for that signal.
+- **Detail hook** — optional `SignalDetailExtension` (`detailHook`) receives the SPLASH renderer, the signal, and the category's palette intent so you can append custom formatted lines before trace and payload.
 
 ```go
 import (
@@ -153,7 +154,7 @@ splashRenderer := splash.SPLASH_Rendering_TerminalRendererCreate(
     splash.SPLASH_Rendering_TerminalColorModeAnsi16,
     palette,
 )
-buf := rendering.SignalRendererCreate(splashRenderer, grouping, formatLocation, metaIntent)
+buf := rendering.SignalRendererCreate(splashRenderer, grouping, formatLocation, nil, metaIntent)
 signal.SignalDispatcherRegisterSink(dispatcher, "cli", rendering.SignalRendererSinkGet(buf))
 
 // ... emit signals ...

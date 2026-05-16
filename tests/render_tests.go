@@ -83,9 +83,9 @@ func SignalTestRenderer(t *testing.T) {
 
 	// 3. Client initializes the Adapters
 	// ANSI mode uses Category grouping, TrueColor uses File grouping to prove the divergence.
-	rendererNone := rendering.SignalRendererCreate(splashNone, categoryGroupingStrategy, clientLocationFormatter, IntentMeta)
-	rendererANSI := rendering.SignalRendererCreate(splashANSI, categoryGroupingStrategy, clientLocationFormatter, IntentMeta)
-	rendererTrue := rendering.SignalRendererCreate(splashTrue, fileGroupingStrategy, clientLocationFormatter, IntentMeta)
+	rendererNone := rendering.SignalRendererCreate(splashNone, categoryGroupingStrategy, clientLocationFormatter, nil, IntentMeta)
+	rendererANSI := rendering.SignalRendererCreate(splashANSI, categoryGroupingStrategy, clientLocationFormatter, nil, IntentMeta)
+	rendererTrue := rendering.SignalRendererCreate(splashTrue, fileGroupingStrategy, clientLocationFormatter, nil, IntentMeta)
 
 	// 4. Setup the Dispatcher
 	manifest := signal.DiagnosticCategoryManifest{

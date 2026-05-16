@@ -7,6 +7,7 @@ import (
 	"signal"
 	"signal/rendering"
 	"slices"
+	"splash"
 	"strings"
 	"sync"
 	"time"
@@ -885,21 +886,25 @@ func runBufferedRendererScenario(execCtx shield.SHIELD_Testing_ExecutionContext)
 			),
 		},
 		func(input scenarioInput) (scenarioOutput, error) {
-			// Setup Dispatcher with a mock manifest supporting ERROR and WARNING
 			manifest := signal.DiagnosticCategoryManifest{
 				{Label: "WARNING", Weight: 10},
 				{Label: "ERROR", Weight: 20},
 			}
 			dispatcher := signal.SignalDispatcherCreate(manifest)
 
-			// 1. Initialize the Renderer (This will cause compiler errors until implemented)
-			// Assuming you will create a signal.RenderColorNone constant
-			renderer := rendering.SignalRendererCreate(rendering.RenderColorNone)
+			// 1. Create a dummy palette for the test (since it uses ModeNone anyway)
+			paletteBuilder := splash.SPLASH_Rendering_TerminalPaletteBuilderCreate(int(intentCount))
+			palette := paletteBuilder.Build()
 
-			// 2. Register the renderer's Capture method as the sink
+			// 2. Direct use of the splash dependency
+			splashRenderer := splash.SPLASH_Rendering_TerminalRendererCreate(splash.SPLASH_Rendering_TerminalColorModeNone, palette)
+
+			// 3. Inject into the adapter
+			renderer := rendering.SignalRendererCreate(splashRenderer, categoryGroupingStrategy, IntentMeta)
+
 			signal.SignalDispatcherRegisterSink(dispatcher, "buffered_cli_renderer", rendering.SignalRendererSinkGet(renderer))
 
-			// 3. Setup Context and emit signals
+			// 4. Setup Context and emit signals
 			ctx := signal.SignalContextCreate(dispatcher)
 			signal.SignalContextPushSpan(ctx, "AST Parsing Phase")
 
@@ -912,7 +917,7 @@ func runBufferedRendererScenario(execCtx shield.SHIELD_Testing_ExecutionContext)
 			signal.SignalContextBuild(ctx, "WARNING_LEXER_02", "WARNING").
 				Emit()
 
-			// 4. Render the buffer
+			// 5. Render the buffer
 			finalOutput := rendering.SignalRendererRender(renderer)
 
 			return scenarioOutput{renderedOutput: finalOutput}, nil

@@ -6,6 +6,7 @@ This subpackage sits beside the core `signal` API: producers still emit through 
 
 [Model]
 Register `SignalRendererSinkGet` on a dispatcher to capture emissions, then call `SignalRendererRender` when the batch is complete. Render drains the internal signal buffer and returns the SPLASH renderer's string; an empty capture yields an empty string without writing to SPLASH.
+Supply a `LocationFormatter` at creation to control how `foundation/location` values appear beside each signal id; pass `nil` to omit location output entirely.
 
 [Thread Safety]
 `SignalRenderer` synchronizes its signal buffer; the returned sink and `SignalRendererRender` may be used from concurrent emitters as long as they target the same renderer instance.

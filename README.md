@@ -100,7 +100,7 @@ signal.SignalContextBuild(ctx, "ERR_UNDEFINED", "ERROR").
 `signal/rendering` is optional. It adapts **SPLASH** for batched CLI-style output:
 
 1. In your application, create a SPLASH palette and `splash.SPLASH_Rendering_TerminalRenderer` (see the SPLASH module documentation).
-2. `rendering.SignalRendererCreate(renderer, grouping, metaIntent)` — sets indent width to 2 on the SPLASH renderer.
+2. `rendering.SignalRendererCreate(renderer, grouping, formatLocation, metaIntent)` — sets indent width to 2 on the SPLASH renderer. `formatLocation` is a `LocationFormatter` (`func(*location.Location) string`) appended on the same line as `[CATEGORY] id`; pass `nil` to skip location text.
 3. Register `rendering.SignalRendererSinkGet(renderer)` on the Signal dispatcher.
 4. Emit signals as usual.
 5. `rendering.SignalRendererRender(renderer)` returns the formatted string and clears the capture buffer.
@@ -110,6 +110,7 @@ signal.SignalContextBuild(ctx, "ERR_UNDEFINED", "ERROR").
 - `ExtractKey` — bucket key per signal (e.g. category string or file path from `Location`).
 - `PriorityOrder` — which buckets appear first in the body and summary.
 - `ResolveIntent` — SPLASH palette slot for group headers, summary pills, and per-line category color.
+- **Location formatting** — optional `LocationFormatter` passed to `SignalRendererCreate`. Invoked when a signal has a location; return `""` to print nothing for that signal.
 
 ```go
 import (
@@ -118,8 +119,17 @@ import (
     "signal"
     "signal/rendering"
 
+    "foundation/location"
     "splash"
 )
+
+formatLocation := func(loc *location.Location) string {
+    line, err := location.LocationCoordinateGetAs[int](*loc, "line")
+    if err == nil && line > 0 {
+        return fmt.Sprintf(" at line %d", line)
+    }
+    return ""
+}
 
 grouping := rendering.GroupingConfiguration{
     ExtractKey: func(sig signal.Signal) string {
@@ -143,7 +153,7 @@ splashRenderer := splash.SPLASH_Rendering_TerminalRendererCreate(
     splash.SPLASH_Rendering_TerminalColorModeAnsi16,
     palette,
 )
-buf := rendering.SignalRendererCreate(splashRenderer, grouping, metaIntent)
+buf := rendering.SignalRendererCreate(splashRenderer, grouping, formatLocation, metaIntent)
 signal.SignalDispatcherRegisterSink(dispatcher, "cli", rendering.SignalRendererSinkGet(buf))
 
 // ... emit signals ...

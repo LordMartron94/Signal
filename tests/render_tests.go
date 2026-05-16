@@ -2,7 +2,7 @@ package tests
 
 import (
 	"fmt"
-	"foundation/location" // Added to build actual locations
+	"foundation/location"
 	"signal"
 	"signal/rendering"
 	"splash"
@@ -55,6 +55,15 @@ var fileGroupingStrategy = rendering.GroupingConfiguration{
 	PriorityOrder: []string{"Global Diagnostics"},
 }
 
+var clientLocationFormatter = func(loc *location.Location) string {
+	line, errL := location.LocationCoordinateGetAs[int](*loc, "line")
+	if errL == nil && line > 0 {
+		return fmt.Sprintf(" at line %d", line)
+	}
+
+	return ""
+}
+
 func SignalTestRenderer(t *testing.T) {
 	// 1. Client builds the visual Palette
 	paletteBuilder := splash.SPLASH_Rendering_TerminalPaletteBuilderCreate(int(intentCount))
@@ -74,9 +83,9 @@ func SignalTestRenderer(t *testing.T) {
 
 	// 3. Client initializes the Adapters
 	// ANSI mode uses Category grouping, TrueColor uses File grouping to prove the divergence.
-	rendererNone := rendering.SignalRendererCreate(splashNone, categoryGroupingStrategy, IntentMeta)
-	rendererANSI := rendering.SignalRendererCreate(splashANSI, categoryGroupingStrategy, IntentMeta)
-	rendererTrue := rendering.SignalRendererCreate(splashTrue, fileGroupingStrategy, IntentMeta)
+	rendererNone := rendering.SignalRendererCreate(splashNone, categoryGroupingStrategy, clientLocationFormatter, IntentMeta)
+	rendererANSI := rendering.SignalRendererCreate(splashANSI, categoryGroupingStrategy, clientLocationFormatter, IntentMeta)
+	rendererTrue := rendering.SignalRendererCreate(splashTrue, fileGroupingStrategy, clientLocationFormatter, IntentMeta)
 
 	// 4. Setup the Dispatcher
 	manifest := signal.DiagnosticCategoryManifest{

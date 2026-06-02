@@ -214,8 +214,9 @@ func signalDispatcherDiagnosticCategoryIsValid(dispatcher *SignalDispatcher, cat
 // ----------------------------------------------------------- CONTEXT
 
 type SignalContext struct {
-	dispatcher *SignalDispatcher
-	spanStack  []string
+	dispatcher        *SignalDispatcher
+	spanStack         []string
+	telemetryDisabled bool
 }
 
 func SignalContextCreate(dispatcher *SignalDispatcher) *SignalContext {
@@ -225,20 +226,50 @@ func SignalContextCreate(dispatcher *SignalDispatcher) *SignalContext {
 	}
 }
 
+/*
+SignalContextCreateNoOp returns a context that ignores span and emit operations.
+
+The dispatcher is retained so callers can enable a real context later; steady-state emission is free.
+*/
+func SignalContextCreateNoOp(dispatcher *SignalDispatcher) *SignalContext {
+	return &SignalContext{
+		dispatcher:        dispatcher,
+		spanStack:         make([]string, 0),
+		telemetryDisabled: true,
+	}
+}
+
+func signalContextTelemetryActive(ctx *SignalContext) bool {
+	return ctx != nil && !ctx.telemetryDisabled
+}
+
 func SignalContextClone(ctx *SignalContext) *SignalContext {
+	if ctx == nil {
+		return nil
+	}
+
 	spanStackCopy := slices.Clone(ctx.spanStack)
 
 	return &SignalContext{
-		dispatcher: ctx.dispatcher,
-		spanStack:  spanStackCopy,
+		dispatcher:        ctx.dispatcher,
+		spanStack:         spanStackCopy,
+		telemetryDisabled: ctx.telemetryDisabled,
 	}
 }
 
 func SignalContextPushSpan(ctx *SignalContext, span string) {
+	if !signalContextTelemetryActive(ctx) {
+		return
+	}
+
 	ctx.spanStack = append(ctx.spanStack, span)
 }
 
 func SignalContextPopSpan(ctx *SignalContext) {
+	if !signalContextTelemetryActive(ctx) {
+		return
+	}
+
 	amountOfSpans := len(ctx.spanStack)
 	if amountOfSpans > 0 {
 		ctx.spanStack = ctx.spanStack[0 : amountOfSpans-1]
@@ -246,6 +277,10 @@ func SignalContextPopSpan(ctx *SignalContext) {
 }
 
 func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCategory DiagnosticCategory, payload map[string]any, location *location.Location) Signal {
+	if !signalContextTelemetryActive(ctx) {
+		return Signal{}
+	}
+
 	if !signalDispatcherDiagnosticCategoryIsValid(ctx.dispatcher, diagnosticCategory) {
 		panic(fmt.Errorf("unknown diagnostic category '%s', did you forget to declare it in the manifest?", diagnosticCategory))
 	}
@@ -264,5 +299,9 @@ func SignalContextSignalCreate(ctx *SignalContext, signalID string, diagnosticCa
 }
 
 func SignalContextEmit(ctx *SignalContext, signal Signal) {
+	if !signalContextTelemetryActive(ctx) {
+		return
+	}
+
 	signalDispatcherEmit(ctx.dispatcher, signal)
 }

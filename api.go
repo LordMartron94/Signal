@@ -142,6 +142,15 @@ func SignalContextCreate(dispatcher *SignalDispatcher) *SignalContext {
 }
 
 /*
+SignalContextCreateNoOp returns a context that ignores span push/pop and signal emission.
+
+Use when a dispatcher and manifest are required but steady-state telemetry must be free.
+*/
+func SignalContextCreateNoOp(dispatcher *SignalDispatcher) *SignalContext {
+	return internal.SignalContextCreateNoOp(dispatcher)
+}
+
+/*
 SignalContextClone creates a new context that shares the dispatcher and copies the current span stack.
 
 [Context]
@@ -282,6 +291,12 @@ Invokes `SignalContextSignalCreate`, then clears `ctx`, `payload`, and `location
 The builder must be discarded afterward; chaining `Payload`, `Location`, `Build`, or `Emit` on the same instance is invalid.
 */
 func (b *SignalBuilder) Build() Signal {
+	if b.ctx == nil {
+		b.payload = nil
+		b.location = nil
+		return Signal{}
+	}
+
 	sig := SignalContextSignalCreate(b.ctx, b.id, b.category, b.payload, b.location)
 
 	b.ctx = nil
@@ -306,6 +321,12 @@ Invokes sink callbacks synchronously as part of emission.
 Clears `ctx`, `payload`, and `location` on the builder via `Build`; the builder must be discarded afterward.
 */
 func (b *SignalBuilder) Emit() {
+	if b.ctx == nil {
+		b.payload = nil
+		b.location = nil
+		return
+	}
+
 	ctx := b.ctx
 
 	sig := b.Build()
